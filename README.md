@@ -1,5 +1,8 @@
 # plugin-switch
 
+[![release](https://img.shields.io/github/v/release/cynch18/plugin-switch)](https://github.com/cynch18/plugin-switch/releases/latest)
+[![test](https://github.com/cynch18/plugin-switch/actions/workflows/test.yml/badge.svg)](https://github.com/cynch18/plugin-switch/actions/workflows/test.yml)
+
 给 DeepSeek Harness (DSH) 的**插件清单页加上开关**：点一下即可启用/停用任何插件，立即生效、不用重启服务端，重启后状态保持。
 
 ## 快速开始
