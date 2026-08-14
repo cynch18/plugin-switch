@@ -4,6 +4,16 @@
 
 ## 快速开始
 
+**方式一：直接下载（推荐，不用 git）**
+
+在 [Releases](https://github.com/cynch18/plugin-switch/releases/latest) 下载 `plugin-switch.zip`，解压后在解压目录运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+**方式二：git clone**
+
 ```powershell
 git clone https://github.com/cynch18/plugin-switch.git
 cd plugin-switch
