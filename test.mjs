@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyPatchEdit, backupFileName, collectRowIds, dependentsOf, isBackupFile, normalizeName, patchHasRow, pruneBackups, scrubBakedDisabled } from "./index.js";
+import { applyPatchEdit, backupFileName, collectRowIds, dependentsOf, isBackupFile, mergedInjectOf, normalizeName, patchHasRow, pruneBackups, scrubBakedDisabled } from "./index.js";
 
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
@@ -213,6 +213,23 @@ test("dependentsOf finds typical webserver cascade", () => {
   ];
   const dependents = dependentsOf(entries, ["include:webserver", "webserver"]);
   assert.deepStrictEqual(dependents, ["include:web-runtime", "include:plugin-switch"], "matches webServer via normalization, skips group");
+});
+
+test("mergedInjectOf includes code-level inject from the fiber runtime", () => {
+  const entry = {
+    id: "include:web-runtime",
+    options: { name: "y", inject: ["webStartup"] },
+    fiber: { runtime: { callback: { inject: ["webServer"] } } },
+  };
+  assert.deepStrictEqual(mergedInjectOf(entry), ["webStartup", "webServer"], "merged, deduped, in order");
+  const dependents = dependentsOf([entry], ["webserver"]);
+  assert.deepStrictEqual(dependents, ["include:web-runtime"], "code-level inject makes it a dependent");
+});
+
+test("mergedInjectOf tolerates missing fiber and non-array inject", () => {
+  assert.deepStrictEqual(mergedInjectOf({ options: { name: "a" } }), []);
+  assert.deepStrictEqual(mergedInjectOf({ options: { name: "a", inject: { x: 1, y: 2 } } }), ["x", "y"]);
+  assert.deepStrictEqual(mergedInjectOf({ options: { name: "a", inject: ["z"] }, fiber: { runtime: { callback: null } } }), ["z"]);
 });
 
 if (process.exitCode) {

@@ -197,6 +197,31 @@ function injectOf(entry) {
   return [];
 }
 
+/** 插件代码层的 inject（类 static / 对象属性），从 fiber 运行时回调读取。 */
+function pluginInjectOf(entry) {
+  try {
+    const inject = entry.fiber?.runtime?.callback?.inject;
+    if (inject === undefined || inject === null) return [];
+    if (Array.isArray(inject)) return inject;
+    if (typeof inject === "object") return Object.keys(inject);
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+/** 合并条目行 inject 与插件代码层 inject（去重、保序）。 */
+export function mergedInjectOf(entry) {
+  const seen = new Set();
+  const result = [];
+  for (const name of [...injectOf(entry), ...pluginInjectOf(entry)]) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    result.push(name);
+  }
+  return result;
+}
+
 /**
  * 归一化服务/条目名：小写 + 去非字母数字。
  * 启发式匹配的基础：inject 是服务名（webServer、clientModules），条目 id 是
@@ -207,13 +232,13 @@ export function normalizeName(name) {
   return String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** 纯函数：返回 inject 依赖 targetIds（归一化匹配）的条目 id 列表。 */
+/** 纯函数：返回 inject 依赖 targetIds（归一化匹配，条目行 + 代码层合并）的条目 id 列表。 */
 export function dependentsOf(entries, targetIds) {
   const targets = new Set(targetIds.map(normalizeName));
   const result = [];
   for (const entry of entries) {
     if (entry.options?.group) continue;
-    if (injectOf(entry).some((name) => targets.has(normalizeName(name)))) {
+    if (mergedInjectOf(entry).some((name) => targets.has(normalizeName(name)))) {
       result.push(entry.id);
     }
   }
@@ -258,7 +283,7 @@ function listEntries(ctx, profileContent) {
       moduleName: entry.options.name,
       enabled: !entry.disabled,
       fiberPhase: fiberPhaseOf(entry),
-      inject: injectOf(entry),
+      inject: mergedInjectOf(entry),
       failure: failureOf(entry),
       config: configPreviewOf(entry),
       disabledSource: disabledSourceOf(entry, profileContent),
