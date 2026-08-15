@@ -1,13 +1,16 @@
-// dsh-profile-plugin-switch — host half (stage 3 draft).
-// GUI 插件开关：GET /plugin-switch/list + POST /plugin-switch/toggle。
+// dsh-profile-plugin-switch — host half.
+// GUI 插件开关：GET /plugin-switch/list|backups + POST /plugin-switch/toggle|undo。
 //
 // 热开关原理：
 //   1) 内存：entry.update({disabled}) 立即 dispose/start 对应 fiber（loader 原生热开关）。
 //   2) 持久化：文本级改写 cordis.patch.yml（保留注释），由 DSH 的 patch watcher
 //      (watchUserPatches) 通过 HMR 事务性重放；不使用 EntryTree.update 等会把补丁
 //      行烘焙进基础配置文件的路径。
-import { existsSync } from "node:fs";
-import { readFile, rename, writeFile } from "node:fs/promises";
+//   3) 保险：每次 toggle 写文件前自动备份到 <profile>/backups/（保留最近 20 份），
+//      可通过 /undo 恢复。
+import { existsSync, readdirSync } from "node:fs";
+import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const name = "plugin-switch";
@@ -84,6 +87,42 @@ export function applyPatchEdit(content, shortId, disabled) {
   return lines.join("\n");
 }
 
+// ── 备份（导出供测试与 CLI 复用） ────────────────────────────────────────
+export function backupFileName(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `cordis.patch.${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${String(date.getMilliseconds()).padStart(3, "0")}.yml`;
+}
+
+export function isBackupFile(fileName) {
+  return /^cordis\.patch\.\d{8}-\d{6}-\d{3}\.yml$/.test(fileName);
+}
+
+/** 轮换：删除超出 limit 的最旧备份，返回被删文件名列表。 */
+export async function pruneBackups(backupsDir, limit = 20) {
+  const files = (await readdir(backupsDir)).filter(isBackupFile).sort();
+  const excess = files.slice(0, Math.max(0, files.length - limit));
+  for (const file of excess) await unlink(join(backupsDir, file));
+  return excess;
+}
+
+/** 把当前 patch 文件备份进 backupsDir 并轮换。 */
+export async function writeBackup(patchPath, backupsDir, now = new Date()) {
+  await mkdir(backupsDir, { recursive: true });
+  await copyFile(patchPath, join(backupsDir, backupFileName(now)));
+  await pruneBackups(backupsDir);
+}
+
+/** 用最新备份覆盖 patch 文件，返回被恢复的备份文件名。 */
+export async function restoreLatestBackup(patchPath, backupsDir) {
+  const files = (await readdir(backupsDir)).filter(isBackupFile).sort();
+  if (files.length === 0) throw new Error("no backups available");
+  const latest = files[files.length - 1];
+  const content = await readFile(join(backupsDir, latest), "utf8");
+  // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
+  await writeFile(patchPath, content, "utf8");
+  return latest;
+}
+
 // ── HTTP 小工具 ───────────────────────────────────────────────────────────
 const MAX_BODY = 64 * 1024;
 
@@ -119,6 +158,29 @@ function fiberPhaseOf(entry) {
   return ["pending", "loading", "active", "failed", null, "unloading"][fiber.state] ?? null;
 }
 
+/** 失败条目提取 fiber 错误原文（拿不到返回 null，不抛错）。 */
+function failureOf(entry) {
+  const fiber = entry.fiber;
+  if (fiber === undefined) return null;
+  try {
+    const error = fiber.error;
+    if (error === undefined || error === null) return null;
+    if (error instanceof Error) return `${error.name !== "Error" ? `${error.name}: ` : ""}${error.message}`;
+    return String(error);
+  } catch {
+    return null;
+  }
+}
+
+/** inject 的服务名列表（数组直取；对象取键名；其余为空数组）。 */
+function injectOf(entry) {
+  const inject = entry.options.inject;
+  if (inject === undefined || inject === null) return [];
+  if (Array.isArray(inject)) return inject;
+  if (typeof inject === "object") return Object.keys(inject);
+  return [];
+}
+
 function listEntries(ctx) {
   const entries = [];
   for (const entry of ctx.loader.entries()) {
@@ -128,23 +190,11 @@ function listEntries(ctx) {
       moduleName: entry.options.name,
       enabled: !entry.disabled,
       fiberPhase: fiberPhaseOf(entry),
+      inject: injectOf(entry),
+      failure: failureOf(entry),
     });
   }
   return entries;
-}
-
-function findEntry(ctx, id) {
-  const exact = [];
-  const suffix = [];
-  for (const entry of ctx.loader.entries()) {
-    if (entry.options.group) continue;
-    if (entry.id === id || entry.options.id === id) exact.push(entry);
-    else if (entry.id.endsWith(":" + id)) suffix.push(entry);
-  }
-  if (exact.length === 1) return exact[0];
-  if (exact.length > 1) return undefined; // 歧义交给调用方用 matches 报告
-  if (suffix.length === 1) return suffix[0];
-  return undefined;
 }
 
 function findMatches(ctx, id) {
@@ -162,12 +212,20 @@ function findMatches(ctx, id) {
 export function apply(ctx) {
   const patchPath = resolvePatchPath();
   if (patchPath === undefined) {
-    ctx.logger?.error?.(
-      "plugin-switch: cordis.patch.yml not found at either candidate location; toggle will fail",
-    );
+    console.error("plugin-switch: cordis.patch.yml not found at either candidate location; toggle will fail");
   }
+  const backupsDir = patchPath !== undefined ? join(dirname(patchPath), "backups") : undefined;
 
   let inFlight = false;
+
+  const hasBackups = async () => {
+    if (backupsDir === undefined) return false;
+    try {
+      return readdirSync(backupsDir).some(isBackupFile);
+    } catch {
+      return false;
+    }
+  };
 
   const route = {
     kind: "prefix",
@@ -180,7 +238,49 @@ export function apply(ctx) {
             sendJson(res, 405, { ok: false, error: "method not allowed" });
             return;
           }
-          sendJson(res, 200, { ok: true, value: { entries: listEntries(ctx) } });
+          sendJson(res, 200, { ok: true, value: { entries: listEntries(ctx), hasBackups: await hasBackups() } });
+          return;
+        }
+
+        if (pathname === "/plugin-switch/backups") {
+          if (req.method !== "GET") {
+            sendJson(res, 405, { ok: false, error: "method not allowed" });
+            return;
+          }
+          let files = [];
+          if (backupsDir !== undefined) {
+            try {
+              files = readdirSync(backupsDir).filter(isBackupFile).sort();
+            } catch {
+              files = [];
+            }
+          }
+          sendJson(res, 200, { ok: true, value: { files } });
+          return;
+        }
+
+        if (pathname === "/plugin-switch/undo") {
+          if (req.method !== "POST") {
+            sendJson(res, 405, { ok: false, error: "method not allowed" });
+            return;
+          }
+          if (inFlight) {
+            sendJson(res, 409, { ok: false, error: "busy: another operation is in progress" });
+            return;
+          }
+          if (patchPath === undefined || backupsDir === undefined) {
+            sendJson(res, 500, { ok: false, error: "patch file not found" });
+            return;
+          }
+          inFlight = true;
+          try {
+            const restored = await restoreLatestBackup(patchPath, backupsDir);
+            sendJson(res, 200, { ok: true, value: { restored } });
+          } catch (error) {
+            sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+          } finally {
+            inFlight = false;
+          }
           return;
         }
 
@@ -190,7 +290,7 @@ export function apply(ctx) {
             return;
           }
           if (inFlight) {
-            sendJson(res, 409, { ok: false, error: "busy: another toggle is in progress" });
+            sendJson(res, 409, { ok: false, error: "busy: another operation is in progress" });
             return;
           }
           const body = await readBody(req);
@@ -234,15 +334,16 @@ export function apply(ctx) {
             // 1) 内存热开关（立即生效，不写文件）。
             await entry.update({ disabled: !enabled });
 
-            // 2) 持久化到补丁层（HMR 重放保持状态一致）。
+            // 2) 持久化到补丁层（写前自动备份）。
             let persisted = false;
             let persistError;
-            if (patchPath !== undefined) {
+            if (patchPath !== undefined && backupsDir !== undefined) {
               try {
+                await writeBackup(patchPath, backupsDir);
                 const content = await readFile(patchPath, "utf8");
                 const next = applyPatchEdit(content, entry.options.id, !enabled);
-                await writeFile(patchPath + ".tmp", next, "utf8");
-                await rename(patchPath + ".tmp", patchPath);
+                // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
+                await writeFile(patchPath, next, "utf8");
                 persisted = true;
               } catch (error) {
                 persistError = error instanceof Error ? error.message : String(error);

@@ -1,8 +1,11 @@
-// plugin-switch test.mjs — unit tests for applyPatchEdit.
+// plugin-switch test.mjs — unit tests for applyPatchEdit and backups.
 // Run: npm test  (requires `npm install` once, for js-yaml)
 import { strict as assert } from "node:assert";
 import { createRequire } from "node:module";
-import { applyPatchEdit } from "./index.js";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { applyPatchEdit, backupFileName, isBackupFile, pruneBackups } from "./index.js";
 
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
@@ -129,6 +132,34 @@ test("no false prefix match", () => {
 });
 
 console.log(`\n${passed} passed`);
+
+// ── 备份（P2.1）──
+test("backup file naming and recognition", () => {
+  const name = backupFileName(new Date(2026, 0, 2, 3, 4, 5, 6));
+  assert.strictEqual(name, "cordis.patch.20260102-030405-006.yml");
+  assert.ok(isBackupFile(name));
+  assert.ok(!isBackupFile("cordis.patch.yml"));
+  assert.ok(!isBackupFile("other.txt"));
+});
+
+test("pruneBackups keeps the newest 20", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "psw-test-"));
+  try {
+    for (let i = 0; i < 25; i++) {
+      const name = `cordis.patch.20260101-0000${String(i).padStart(2, "0")}-000.yml`;
+      await writeFile(join(dir, name), "x");
+    }
+    const removed = await pruneBackups(dir, 20);
+    assert.strictEqual(removed.length, 5, "removes 5 oldest");
+    const remaining = (await readdir(dir)).filter(isBackupFile);
+    assert.strictEqual(remaining.length, 20);
+    assert.ok(remaining.includes("cordis.patch.20260101-000020-000.yml"), "newest kept");
+    assert.ok(!remaining.includes("cordis.patch.20260101-000000-000.yml"), "oldest dropped");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   console.error("some tests failed");
 }
