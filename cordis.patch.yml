@@ -1,6 +1,18 @@
 # dsh-profile-plugin-switch bundle patch (used by `dsh plugin add` installs).
-# The install.ps1 path writes the same row into the profile's own
-# cordis.patch.yml instead — use one installation method, not both.
+# The install.ps1 path writes the same rows into the profile's own
+# cordis.patch.yml instead — use ONE installation method, not both
+# (installing twice would create duplicate plugin-switch rows).
+#
+# The two disables replace the read-only plugin inventory with the
+# toggle-enabled one; without them our tab yields to the original and
+# never renders. This bundle layer applies after dsh-web-app, so these
+# id-targeted disables are effective.
+- id: ui-settings-plugin-inventory
+  disabled: true
+
+- id: plugin-inventory
+  disabled: true
+
 - insert:
     - id: plugin-switch
       name: dsh-profile-plugin-switch
