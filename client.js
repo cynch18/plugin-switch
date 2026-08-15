@@ -68,6 +68,8 @@ window.__ModuleLoader__.load({
       sourceBundle: "bundle 层",
       depsLabel: "依赖服务",
       depsNone: "（无）",
+      dependentsLabel: "被依赖",
+      dependentsConfirm: "停用 {id} 将影响 {n} 个插件：{names}。确定继续？",
       configLabel: "配置",
     };
     const en = {
@@ -127,6 +129,8 @@ window.__ModuleLoader__.load({
       sourceBundle: "bundle layer",
       depsLabel: "Dependencies",
       depsNone: "(none)",
+      dependentsLabel: "Depended on by",
+      dependentsConfirm: "Disabling {id} affects {n} plugins: {names}. Continue?",
       configLabel: "Config",
     };
 
@@ -320,6 +324,14 @@ window.__ModuleLoader__.load({
         if (!skipConfirm && isCritical(entry)) {
           if (!window.confirm(t(CRITICAL[shortId(entry)]))) return { ok: false, cancelled: true };
         }
+        if (!skipConfirm && !isCritical(entry) && Array.isArray(entry.dependents) && entry.dependents.length > 0) {
+          const names = entry.dependents.join(", ");
+          const message = t("dependentsConfirm")
+            .replace("{id}", shortId(entry))
+            .replace("{n}", String(entry.dependents.length))
+            .replace("{names}", names);
+          if (!window.confirm(message)) return { ok: false, cancelled: true };
+        }
         setPendingId(entry.entryId);
         setNotice(null);
         try {
@@ -474,6 +486,8 @@ window.__ModuleLoader__.load({
                     : null,
                   e("dt", null, t("depsLabel")),
                   e("dd", null, entry.inject && entry.inject.length > 0 ? entry.inject.join(", ") : t("depsNone")),
+                  e("dt", null, t("dependentsLabel")),
+                  e("dd", null, entry.dependents && entry.dependents.length > 0 ? `${entry.dependents.length} \u00B7 ${entry.dependents.join(", ")}` : t("depsNone")),
                   entry.config !== null && entry.config !== undefined
                     ? [e("dt", { key: "cfg-l" }, t("configLabel")), e("dd", { key: "cfg-v" }, e("code", { className: "psw-config" }, entry.config))]
                     : null

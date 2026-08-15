@@ -197,6 +197,29 @@ function injectOf(entry) {
   return [];
 }
 
+/**
+ * 归一化服务/条目名：小写 + 去非字母数字。
+ * 启发式匹配的基础：inject 是服务名（webServer、clientModules），条目 id 是
+ * kebab（webserver、client-modules）——归一化后两者可对齐。尽力而为，服务名与
+ * 条目 id 并非一一对应（区别于 dsh-web-plugin-manager 的完整依赖图）。
+ */
+export function normalizeName(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** 纯函数：返回 inject 依赖 targetIds（归一化匹配）的条目 id 列表。 */
+export function dependentsOf(entries, targetIds) {
+  const targets = new Set(targetIds.map(normalizeName));
+  const result = [];
+  for (const entry of entries) {
+    if (entry.options?.group) continue;
+    if (injectOf(entry).some((name) => targets.has(normalizeName(name)))) {
+      result.push(entry.id);
+    }
+  }
+  return result;
+}
+
 /** 纯函数：profile patch 文件里是否有该 shortId 的条目行（顶层或 insert 内）。 */
 export function patchHasRow(content, shortId) {
   const escaped = shortId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -226,8 +249,9 @@ function disabledSourceOf(entry, profileContent) {
 }
 
 function listEntries(ctx, profileContent) {
+  const all = [...ctx.loader.entries()];
   const entries = [];
-  for (const entry of ctx.loader.entries()) {
+  for (const entry of all) {
     if (entry.options.group) continue;
     entries.push({
       entryId: entry.id,
@@ -238,6 +262,7 @@ function listEntries(ctx, profileContent) {
       failure: failureOf(entry),
       config: configPreviewOf(entry),
       disabledSource: disabledSourceOf(entry, profileContent),
+      dependents: dependentsOf(all, [entry.id, entry.options.id]),
     });
   }
   return entries;

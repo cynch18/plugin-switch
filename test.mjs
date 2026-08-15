@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyPatchEdit, backupFileName, collectRowIds, isBackupFile, patchHasRow, pruneBackups, scrubBakedDisabled } from "./index.js";
+import { applyPatchEdit, backupFileName, collectRowIds, dependentsOf, isBackupFile, normalizeName, patchHasRow, pruneBackups, scrubBakedDisabled } from "./index.js";
 
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
@@ -193,6 +193,26 @@ test("scrubBakedDisabled keeps baked value when the id is still in the file", ()
   const others = [{ insert: [{ id: "tool-bash", disabled: false }] }];
   const out = scrubBakedDisabled(others, new Set(["tool-bash"]), new Set(["tool-bash"]));
   assert.strictEqual(out[0].insert[0].disabled, false, "override in file wins, baked value kept");
+});
+
+// ── 依赖预警（P5.4）──
+test("normalizeName aligns service names with kebab ids", () => {
+  assert.strictEqual(normalizeName("webServer"), "webserver");
+  assert.strictEqual(normalizeName("clientModules"), "clientmodules");
+  assert.strictEqual(normalizeName("client-modules"), "clientmodules");
+  assert.strictEqual(normalizeName("Loader"), "loader");
+});
+
+test("dependentsOf finds typical webserver cascade", () => {
+  const entries = [
+    { id: "include:webserver", options: { name: "x", inject: ["webStartup"] } },
+    { id: "include:web-runtime", options: { name: "y", inject: ["webServer", "webStartup"] } },
+    { id: "include:plugin-switch", options: { name: "z", inject: ["loader", "webServer"] } },
+    { id: "include:unrelated", options: { name: "w", inject: ["timer"] } },
+    { id: "include:grp", options: { name: "g", group: true, inject: ["webServer"] } },
+  ];
+  const dependents = dependentsOf(entries, ["include:webserver", "webserver"]);
+  assert.deepStrictEqual(dependents, ["include:web-runtime", "include:plugin-switch"], "matches webServer via normalization, skips group");
 });
 
 if (process.exitCode) {
