@@ -146,20 +146,36 @@ window.__ModuleLoader__.load({
 .psw-notice{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px}
 .psw-notice[data-kind="error"]{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
 .psw-notice[data-kind="warn"]{color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary))}
+.psw-searchRow{align-items:center;gap:8px;display:flex}
+.psw-searchRow .psw-search{flex:1}
+.psw-toolbar{align-items:center;gap:4px;flex-wrap:wrap;display:flex}
 .psw-search{width:100%;color:var(--dsw-alias-label-tertiary);align-items:center;display:flex;position:relative}
 .psw-search input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;height:36px;color:var(--dsw-alias-label-primary);font:inherit;border-radius:8px;outline:none;padding:0 12px;font-size:13px}
 .psw-search input:focus-visible{border-color:var(--dsw-alias-state-business-primary)}
-.psw-toolbar{align-items:center;gap:8px;flex-wrap:wrap;display:flex}
-.psw-chip{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:0 0;border-radius:999px;padding:3px 12px;font-size:12px;line-height:18px;transition:color .14s,border-color .14s,background .14s}
-.psw-chip:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary)}
-.psw-chip[data-active="true"]{background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}
+.psw-undo{appearance:none;font:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;height:28px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-radius:14px;padding:0 12px;font-size:12px;line-height:18px;flex:none;transition:border-color .14s,background .14s,color .14s}
+.psw-undo:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}
+.psw-undo:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+.psw-undo:disabled{cursor:default;opacity:.45}
+.psw-chip{appearance:none;font:inherit;cursor:pointer;display:inline-flex;align-items:center;height:28px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);border-radius:14px;padding:0 9px;font-size:12px;line-height:18px;transition:color .14s,border-color .14s,background .14s}
+.psw-chip:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}
+.psw-chip:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+.psw-chip[data-active="true"]{background:var(--dsw-alias-button-primary-fill);border-color:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}
 .psw-chip:disabled{cursor:default;opacity:.55}
-.psw-spacer{flex:1}
+.psw-chipGhost{appearance:none;font:inherit;cursor:pointer;display:inline-flex;align-items:center;height:28px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:14px;padding:0 7px;font-size:12px;line-height:18px;transition:color .14s,border-color .14s}
+.psw-chipGhost:hover{color:var(--dsw-alias-label-primary)}
+.psw-chipGhost[data-active="true"]{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}
+.psw-sep{width:1px;height:18px;background:var(--dsw-alias-border-l2);margin:0 2px;flex:none}
+.psw-action,.psw-danger{appearance:none;font:inherit;cursor:pointer;display:inline-flex;align-items:center;height:28px;border-radius:14px;padding:0 10px;font-size:12px;line-height:18px;transition:background .14s,border-color .14s}
+.psw-action{border:1px solid var(--dsw-alias-state-business-primary);background:transparent;color:var(--dsw-alias-state-business-primary)}
+.psw-action:hover:not(:disabled){background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent)}
+.psw-danger{border:1px solid var(--dsw-alias-state-error-primary);background:transparent;color:var(--dsw-alias-state-error-primary)}
+.psw-danger:hover:not(:disabled){background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)}
+.psw-action:disabled,.psw-danger:disabled{cursor:default;opacity:.5}
 .psw-cards{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:10px;margin:0;padding:0;list-style:none;display:grid}
 @media (width<=680px){.psw-cards{grid-template-columns:minmax(0,1fr)}}
 .psw-groupHead{align-items:baseline;gap:7px;margin:0 0 6px;padding:0 2px;display:flex}
 .psw-groupHead h3{color:var(--dsw-alias-label-primary);margin:0;font-size:13px;font-weight:600;line-height:20px}
-.psw-groupHead span{color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;font-size:12px;line-height:18px}
+.psw-groupCount{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);border-radius:999px;padding:0 8px;font-size:11px;line-height:18px;font-variant-numeric:tabular-nums}
 .psw-card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:10px;min-width:0;overflow:hidden}
 .psw-cardHead{box-sizing:border-box;width:100%;min-height:52px;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;display:flex}
 .psw-cardHead:hover{background:var(--dsw-alias-interactive-bg-hover)}
@@ -452,14 +468,23 @@ window.__ModuleLoader__.load({
 
       return e("div", { className: "psw-section" },
         notice ? e("div", { className: "psw-notice", "data-kind": notice.kind, role: "status" }, notice.text) : null,
-        e("div", { className: "psw-search" },
-          e("input", {
-            type: "search",
-            placeholder: t("search"),
-            value: query,
-            onChange: (event) => setQuery(event.target.value),
-            "aria-label": t("search"),
-          })
+        e("div", { className: "psw-searchRow" },
+          e("div", { className: "psw-search" },
+            e("input", {
+              type: "search",
+              placeholder: t("search"),
+              value: query,
+              onChange: (event) => setQuery(event.target.value),
+              "aria-label": t("search"),
+            })
+          ),
+          e("button", {
+            type: "button",
+            className: "psw-undo",
+            disabled: !snapshot.hasBackups || bulkRunning,
+            title: snapshot.hasBackups ? t("undo") : undefined,
+            onClick: () => undo(),
+          }, "\u21BA ", t("undo"))
         ),
         e("div", { className: "psw-toolbar" },
           chips.map((chip) => e("button", {
@@ -469,38 +494,32 @@ window.__ModuleLoader__.load({
             "data-active": filter === chip.key ? "true" : "false",
             onClick: () => setFilter(chip.key),
           }, chip.label)),
-          e("span", { className: "psw-spacer" }),
+          e("span", { className: "psw-sep" }),
           e("button", {
             type: "button",
-            className: "psw-chip",
+            className: "psw-chipGhost",
             "data-active": sortBy === "name" ? "true" : "false",
             onClick: () => setSortBy("name"),
           }, t("sortByName")),
           e("button", {
             type: "button",
-            className: "psw-chip",
+            className: "psw-chipGhost",
             "data-active": sortBy === "state" ? "true" : "false",
             onClick: () => setSortBy("state"),
           }, t("sortByState")),
+          e("span", { className: "psw-sep" }),
           e("button", {
             type: "button",
-            className: "psw-chip",
+            className: "psw-action",
             disabled: bulkRunning,
             onClick: () => bulk(true),
           }, bulkRunning ? t("toggling") : t("bulkEnable")),
           e("button", {
             type: "button",
-            className: "psw-chip",
+            className: "psw-danger",
             disabled: bulkRunning,
             onClick: () => bulk(false),
-          }, bulkRunning ? t("toggling") : t("bulkDisable")),
-          e("button", {
-            type: "button",
-            className: "psw-chip",
-            disabled: !snapshot.hasBackups || bulkRunning,
-            title: snapshot.hasBackups ? undefined : t("undo"),
-            onClick: () => undo(),
-          }, t("undo"))
+          }, bulkRunning ? t("toggling") : t("bulkDisable"))
         ),
         snapshot.phase === "loading" && entries.length === 0
           ? e("p", { className: "psw-status", role: "status" }, t("loading"))
@@ -516,7 +535,7 @@ window.__ModuleLoader__.load({
           : groups.map((group) => e("div", { key: group.key },
               e("div", { className: "psw-groupHead" },
                 e("h3", null, group.label),
-                e("span", null, String(group.items.length))
+                e("span", { className: "psw-groupCount" }, String(group.items.length))
               ),
               e("ul", { className: "psw-cards" }, group.items.map(renderCard))
             ))
