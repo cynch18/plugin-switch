@@ -63,6 +63,12 @@ window.__ModuleLoader__.load({
       undoConfirm: "撤销将把配置恢复到上一次开关前的备份（会覆盖之后的手动编辑）。继续？",
       undoDone: "已恢复上一次备份。",
       undoFailed: "撤销失败",
+      sourceLabel: "停用来源",
+      sourceProfile: "profile 补丁层",
+      sourceBundle: "bundle 层",
+      depsLabel: "依赖服务",
+      depsNone: "（无）",
+      configLabel: "配置",
     };
     const en = {
       tab: "Plugin list",
@@ -116,6 +122,12 @@ window.__ModuleLoader__.load({
       undoConfirm: "Undo restores the config from the backup taken before the last toggle (overwriting any later manual edits). Continue?",
       undoDone: "Restored the latest backup.",
       undoFailed: "Undo failed",
+      sourceLabel: "Disabled by",
+      sourceProfile: "profile patch layer",
+      sourceBundle: "bundle layer",
+      depsLabel: "Dependencies",
+      depsNone: "(none)",
+      configLabel: "Config",
     };
 
     // 关键条目：关闭前弹强确认（短 id → 确认文案键）。
@@ -176,6 +188,7 @@ window.__ModuleLoader__.load({
 .psw-grid{grid-template-columns:76px minmax(0,1fr);gap:6px 10px;display:grid}
 .psw-grid dt{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px}
 .psw-grid dd{overflow-wrap:anywhere;min-width:0;color:var(--dsw-alias-label-secondary);margin:0;font-size:12px;line-height:17px}
+.psw-config{font-family:var(--ds-font-family-code);font-size:11px;line-height:16px;white-space:pre-wrap;word-break:break-all}
 `;
 
     const e = React.createElement;
@@ -415,7 +428,15 @@ window.__ModuleLoader__.load({
                   e("dt", null, t("cordis")),
                   e("dd", null, PhaseText({ phase: entry.fiberPhase, t })),
                   e("dt", null, t("details")),
-                  e("dd", null, String(entry.moduleName))
+                  e("dd", null, String(entry.moduleName)),
+                  entry.disabledSource !== null && entry.disabledSource !== undefined
+                    ? [e("dt", { key: "ds-l" }, t("sourceLabel")), e("dd", { key: "ds-v" }, entry.disabledSource === "profile" ? t("sourceProfile") : t("sourceBundle"))]
+                    : null,
+                  e("dt", null, t("depsLabel")),
+                  e("dd", null, entry.inject && entry.inject.length > 0 ? entry.inject.join(", ") : t("depsNone")),
+                  entry.config !== null && entry.config !== undefined
+                    ? [e("dt", { key: "cfg-l" }, t("configLabel")), e("dd", { key: "cfg-v" }, e("code", { className: "psw-config" }, entry.config))]
+                    : null
                 )
               )
             : null

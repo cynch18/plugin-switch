@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyPatchEdit, backupFileName, isBackupFile, pruneBackups } from "./index.js";
+import { applyPatchEdit, backupFileName, isBackupFile, patchHasRow, pruneBackups } from "./index.js";
 
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
@@ -158,6 +158,14 @@ test("pruneBackups keeps the newest 20", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── 补丁来源判定（P3.3）──
+test("patchHasRow detects top-level and nested rows", () => {
+  assert.ok(patchHasRow("- id: x\n", "x"));
+  assert.ok(patchHasRow("- insert:\n    - id: y\n", "y"));
+  assert.ok(!patchHasRow("- id: xy\n", "x"), "no prefix false match");
+  assert.ok(patchHasRow("- id: my.plugin\n", "my.plugin"), "regex-special id");
 });
 
 if (process.exitCode) {

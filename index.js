@@ -197,7 +197,35 @@ function injectOf(entry) {
   return [];
 }
 
-function listEntries(ctx) {
+/** 纯函数：profile patch 文件里是否有该 shortId 的条目行（顶层或 insert 内）。 */
+export function patchHasRow(content, shortId) {
+  const escaped = shortId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^(\\s*)- id:\\s*${escaped}\\s*$`, "m").test(content);
+}
+
+/** config 的安全序列化（只读展示用）。 */
+function configPreviewOf(entry) {
+  const config = entry.options.config;
+  if (config === undefined || config === null) return null;
+  try {
+    return JSON.stringify(config);
+  } catch {
+    try {
+      return String(config);
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** 停用来源：profile 补丁层（文件里有该 id 行）/ bundle 层 / null（未停用）。 */
+function disabledSourceOf(entry, profileContent) {
+  if (!entry.disabled) return null;
+  if (profileContent !== undefined && patchHasRow(profileContent, entry.options.id)) return "profile";
+  return "bundle";
+}
+
+function listEntries(ctx, profileContent) {
   const entries = [];
   for (const entry of ctx.loader.entries()) {
     if (entry.options.group) continue;
@@ -208,6 +236,8 @@ function listEntries(ctx) {
       fiberPhase: fiberPhaseOf(entry),
       inject: injectOf(entry),
       failure: failureOf(entry),
+      config: configPreviewOf(entry),
+      disabledSource: disabledSourceOf(entry, profileContent),
     });
   }
   return entries;
@@ -258,7 +288,15 @@ export function apply(ctx) {
             sendJson(res, 405, { ok: false, error: "method not allowed" });
             return;
           }
-          sendJson(res, 200, { ok: true, value: { entries: listEntries(ctx), hasBackups: await hasBackups() } });
+          let profileContent;
+          if (patchPath !== undefined) {
+            try {
+              profileContent = await readFile(patchPath, "utf8");
+            } catch {
+              profileContent = undefined;
+            }
+          }
+          sendJson(res, 200, { ok: true, value: { entries: listEntries(ctx, profileContent), hasBackups: await hasBackups() } });
           return;
         }
 
