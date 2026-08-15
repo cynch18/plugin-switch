@@ -14,7 +14,7 @@ Adds toggle switches to the DeepSeek Harness (DSH) **plugin inventory page**: en
 - Groups (system / third-party / local), status filters, sorting, search
 - Bulk enable/disable as one transaction (single backup; undo reverts it all)
 - Undo with automatic backups (latest 20 kept)
-- Critical-entry confirmations, disabled-source layering, config preview, failure diagnostics
+- Critical-entry confirmations, depended-on warnings with confirmation, disabled-source layering, config preview, failure diagnostics
 - Multi-tab live sync, CLI recovery tool, bilingual UI, animations
 
 ## Quick start
@@ -22,7 +22,7 @@ Adds toggle switches to the DeepSeek Harness (DSH) **plugin inventory page**: en
 **Option 1: `dsh plugin add` (recommended)**
 
 ```sh
-dsh plugin --profile web add dsh-profile-plugin-switch
+dsh plugin --profile web add github:cynch18/plugin-switch
 ```
 
 **Option 2: direct download (no git)**

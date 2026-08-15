@@ -14,7 +14,7 @@
 - 分组（系统/第三方/本地）、状态筛选、排序、搜索
 - 批量启用/停用（单事务：一次备份，撤销一步全回）
 - 撤销 + 自动备份（保留最近 20 份）
-- 关键条目强确认、停用来源分层、config 预览、失败诊断
+- 关键条目强确认、被依赖提示 + 停用确认警告、停用来源分层、config 预览、失败诊断
 - 多标签页实时同步、CLI 恢复工具、双语界面与动画
 
 ## 快速开始
@@ -22,7 +22,7 @@
 **方式一：`dsh plugin add`（推荐）**
 
 ```sh
-dsh plugin --profile web add dsh-profile-plugin-switch
+dsh plugin --profile web add github:cynch18/plugin-switch
 ```
 
 **方式二：直接下载（不用 git）**
