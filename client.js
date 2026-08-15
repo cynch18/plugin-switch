@@ -143,7 +143,7 @@ window.__ModuleLoader__.load({
     const CSS = `
 .psw-section{width:100%;max-width:760px;color:var(--dsw-alias-label-primary);flex-direction:column;gap:14px;display:flex}
 .psw-status{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}
-.psw-notice{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px}
+.psw-notice{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px;animation:psw-notice-in .18s ease}
 .psw-notice[data-kind="error"]{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
 .psw-notice[data-kind="warn"]{color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary))}
 .psw-searchRow{align-items:center;gap:8px;display:flex}
@@ -176,12 +176,14 @@ window.__ModuleLoader__.load({
 .psw-groupHead{align-items:baseline;gap:7px;margin:0 0 6px;padding:0 2px;display:flex}
 .psw-groupHead h3{color:var(--dsw-alias-label-primary);margin:0;font-size:13px;font-weight:600;line-height:20px}
 .psw-groupCount{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);border-radius:999px;padding:0 8px;font-size:11px;line-height:18px;font-variant-numeric:tabular-nums}
-.psw-card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:10px;min-width:0;overflow:hidden}
+.psw-card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:10px;min-width:0;overflow:hidden;animation:psw-in .22s ease both;transition:border-color .16s,box-shadow .16s,transform .16s}
+.psw-card:hover{transform:translateY(-1px);box-shadow:var(--dsw-shadow-lv1)}
 .psw-cardHead{box-sizing:border-box;width:100%;min-height:52px;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;display:flex}
 .psw-cardHead:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .psw-title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;font-weight:600;line-height:20px;overflow:hidden}
 .psw-trailing{color:var(--dsw-alias-label-tertiary);flex:none;align-items:center;gap:7px;display:inline-flex}
 .psw-dot{background:var(--dsw-alias-label-tertiary);border-radius:999px;flex:none;width:7px;height:7px;display:inline-block;transition:background .2s}
+.psw-dot.psw-dotPop{animation:psw-pop .3s ease}
 .psw-dot[data-phase="active"]{background:var(--dsw-alias-state-success-primary)}
 .psw-dot[data-phase="failed"]{background:var(--dsw-alias-state-error-primary)}
 .psw-dot[data-phase="loading"],.psw-dot[data-phase="pending"]{background:var(--dsw-alias-state-business-primary)}
@@ -200,17 +202,27 @@ window.__ModuleLoader__.load({
 .psw-switch:disabled::after{background:var(--dsw-alias-bg-layer-1)}
 .psw-switch[data-pending="true"]{animation:psw-pulse 1s ease-in-out infinite}
 @keyframes psw-pulse{0%,100%{opacity:.85}50%{opacity:.4}}
+.psw-detailsWrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s var(--ds-ease-in-out,ease)}
+.psw-detailsWrap[data-open="true"]{grid-template-rows:1fr}
+.psw-detailsInner{overflow:hidden;min-height:0}
 .psw-details{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:10px 14px 12px}
 .psw-grid{grid-template-columns:76px minmax(0,1fr);gap:6px 10px;display:grid}
 .psw-grid dt{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px}
 .psw-grid dd{overflow-wrap:anywhere;min-width:0;color:var(--dsw-alias-label-secondary);margin:0;font-size:12px;line-height:17px}
 .psw-config{font-family:var(--ds-font-family-code);font-size:11px;line-height:16px;white-space:pre-wrap;word-break:break-all}
+@keyframes psw-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes psw-pop{0%{transform:scale(1)}45%{transform:scale(1.7)}100%{transform:scale(1)}}
+@keyframes psw-notice-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes psw-spin{to{transform:rotate(360deg)}}
+.psw-spinner{width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;flex:none;animation:psw-spin .8s linear infinite}
+.psw-undoIcon{display:inline-block;transition:transform .25s}
+.psw-undo:hover:not(:disabled) .psw-undoIcon{transform:rotate(-180deg)}
 `;
 
     const e = React.createElement;
 
     function StatusDot(props) {
-      return e("span", { className: "psw-dot", "data-phase": props.phase ?? "none" });
+      return e("span", { className: "psw-dot psw-dotPop", "data-phase": props.phase ?? "none" });
     }
 
     function Tag(props) {
@@ -278,6 +290,13 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         load();
       }, [load]);
+
+      // 通知自动消失（错误保留更久）。
+      React.useEffect(() => {
+        if (!notice) return;
+        const timer = setTimeout(() => setNotice(null), notice.kind === "error" ? 8000 : 4000);
+        return () => clearTimeout(timer);
+      }, [notice]);
 
       // 多标签页同步：广播接收 / 窗口聚焦 / 可见时 30s 轮询。
       React.useEffect(() => {
@@ -406,10 +425,14 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const renderCard = (entry) => {
+      const renderCard = (entry, index) => {
         const open = openId === entry.entryId;
         const pending = pendingId === entry.entryId;
-        return e("li", { key: entry.entryId, className: "psw-card" },
+        return e("li", {
+          key: entry.entryId,
+          className: "psw-card",
+          style: { animationDelay: `${Math.min(index * 18, 360)}ms` },
+        },
           e("div", { className: "psw-cardHead" },
             e("button", {
               type: "button",
@@ -420,7 +443,7 @@ window.__ModuleLoader__.load({
             },
               e("span", { className: "psw-title" }, entry.entryId),
               e("span", { className: "psw-trailing" },
-                StatusDot({ phase: entry.fiberPhase }),
+                StatusDot({ key: `${entry.entryId}:${entry.fiberPhase}:${entry.enabled}`, phase: entry.fiberPhase }),
                 Tag({ enabled: entry.enabled, t })
               )
             ),
@@ -436,8 +459,9 @@ window.__ModuleLoader__.load({
               onClick: () => toggle(entry),
             })
           ),
-          open
-            ? e("div", { className: "psw-details" },
+          e("div", { className: "psw-detailsWrap", "data-open": open ? "true" : "false" },
+            e("div", { className: "psw-detailsInner" },
+              e("div", { className: "psw-details" },
                 e("dl", { className: "psw-grid" },
                   e("dt", null, t("configuration")),
                   e("dd", null, entry.enabled ? t("enabledTag") : t("disabledTag")),
@@ -455,7 +479,8 @@ window.__ModuleLoader__.load({
                     : null
                 )
               )
-            : null
+            )
+          )
         );
       };
 
@@ -484,7 +509,7 @@ window.__ModuleLoader__.load({
             disabled: !snapshot.hasBackups || bulkRunning,
             title: snapshot.hasBackups ? t("undo") : undefined,
             onClick: () => undo(),
-          }, "\u21BA ", t("undo"))
+          }, e("span", { className: "psw-undoIcon" }, "\u21BA"), " ", t("undo"))
         ),
         e("div", { className: "psw-toolbar" },
           chips.map((chip) => e("button", {
@@ -513,13 +538,13 @@ window.__ModuleLoader__.load({
             className: "psw-action",
             disabled: bulkRunning,
             onClick: () => bulk(true),
-          }, bulkRunning ? t("toggling") : t("bulkEnable")),
+          }, bulkRunning ? [e("span", { key: "sp", className: "psw-spinner" }), e("span", { key: "tx" }, t("toggling"))] : t("bulkEnable")),
           e("button", {
             type: "button",
             className: "psw-danger",
             disabled: bulkRunning,
             onClick: () => bulk(false),
-          }, bulkRunning ? t("toggling") : t("bulkDisable"))
+          }, bulkRunning ? [e("span", { key: "sp", className: "psw-spinner" }), e("span", { key: "tx" }, t("toggling"))] : t("bulkDisable"))
         ),
         snapshot.phase === "loading" && entries.length === 0
           ? e("p", { className: "psw-status", role: "status" }, t("loading"))
