@@ -284,7 +284,7 @@ export function apply(ctx) {
 
           inFlight = true;
           try {
-            // 校验：所有 id 唯一命中、非 group。
+            // 校验：所有 id 唯一命中。
             const changes = [];
             for (const item of entries) {
               const matches = findMatches(ctx, item.id);
@@ -297,21 +297,49 @@ export function apply(ctx) {
               changes.push({ entry, want: item.enabled });
             }
             if (changes.length === 0) {
-              sendJson(res, 200, { ok: true, value: { changed: 0, persisted: true } });
+              sendJson(res, 200, { ok: true, value: { changed: 0, failed: [], persisted: true } });
               return;
             }
 
             // 一个批量 = 一个事务：一次备份（undo 一步全回）。
             let persisted = false;
             let persistError;
-            let nextContent;
+            const failures = [];
+            let okChanges = [];
             if (patchPath !== undefined && backupsDir !== undefined) {
               try {
                 await writeBackup(patchPath, backupsDir);
-                nextContent = await readFile(patchPath, "utf8");
+                // 先纯文本预计算每条目标内容，失败的条目剔除（如 !!js 表达式）。
+                let content = await readFile(patchPath, "utf8");
                 for (const change of changes) {
-                  nextContent = applyPatchEdit(nextContent, change.entry.options.id, !change.want);
+                  try {
+                    content = applyPatchEdit(content, change.entry.options.id, !change.want);
+                    okChanges.push(change);
+                  } catch (error) {
+                    failures.push({ id: change.entry.id, error: error instanceof Error ? error.message : String(error) });
+                  }
                 }
+                // 再动内存：逐条容错（如服务名冲突的条目，loader 自回滚该条）。
+                const applied = [];
+                for (const change of okChanges) {
+                  try {
+                    await change.entry.update({ disabled: !change.want });
+                    applied.push(change);
+                  } catch (error) {
+                    failures.push({ id: change.entry.id, error: error instanceof Error ? error.message : String(error) });
+                  }
+                }
+                okChanges = applied;
+                // 文件只写入成功生效的条目，一次性落盘。
+                if (okChanges.length > 0) {
+                  content = await readFile(patchPath, "utf8");
+                  for (const change of okChanges) {
+                    content = applyPatchEdit(content, change.entry.options.id, !change.want);
+                  }
+                  // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
+                  await writeFile(patchPath, content, "utf8");
+                }
+                persisted = true;
               } catch (error) {
                 persistError = error instanceof Error ? error.message : String(error);
               }
@@ -319,23 +347,14 @@ export function apply(ctx) {
               persistError = "patch file not found";
             }
 
-            // 纯文本叠加全部成功后，再动内存；文件最后一次性写入。
-            if (persistError === undefined) {
-              for (const change of changes) {
-                await change.entry.update({ disabled: !change.want });
-              }
-              try {
-                // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
-                await writeFile(patchPath, nextContent, "utf8");
-                persisted = true;
-              } catch (error) {
-                persistError = error instanceof Error ? error.message : String(error);
-              }
-            }
-
             sendJson(res, 200, {
               ok: true,
-              value: { changed: changes.length, persisted, ...(persistError !== undefined ? { persistError } : {}) },
+              value: {
+                changed: okChanges.length,
+                failed: failures,
+                persisted,
+                ...(persistError !== undefined ? { persistError } : {}),
+              },
             });
           } finally {
             inFlight = false;

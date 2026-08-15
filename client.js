@@ -51,6 +51,7 @@ window.__ModuleLoader__.load({
       bulkDisableConfirm: "确认停用 {n} 个插件？关键插件（{m} 个）已自动跳过。",
       bulkNothing: "没有可批量操作的插件（关键插件需单独操作）。",
       bulkDone: "批量完成：{n} 个成功。",
+      bulkPartial: "批量完成：{n} 成功，{m} 失败。",
       bulkFailed: "批量操作失败",
       criticalApiGateway: "停用 api-gateway 将断开 GUI 与后端的通信，页面将失去响应。确定继续？",
       criticalWebserver: "停用 webserver 将关闭本插件与 GUI 的 HTTP 服务。确定继续？",
@@ -103,6 +104,7 @@ window.__ModuleLoader__.load({
       bulkDisableConfirm: "Disable {n} plugins? Critical plugins ({m}) are skipped automatically.",
       bulkNothing: "Nothing to bulk-toggle (critical plugins must be toggled individually).",
       bulkDone: "Bulk done: {n} succeeded.",
+      bulkPartial: "Bulk done: {n} succeeded, {m} failed.",
       bulkFailed: "Bulk operation failed",
       criticalApiGateway: "Disabling api-gateway severs the GUI's connection to the backend and the page will stop responding. Continue?",
       criticalWebserver: "Disabling webserver shuts down the HTTP service used by this plugin and the GUI. Continue?",
@@ -360,7 +362,11 @@ window.__ModuleLoader__.load({
           if (!data.ok) {
             setNotice({ kind: "error", text: `${t("bulkFailed")}: ${data.error ?? ""}` });
           } else {
-            setNotice({ text: t("bulkDone").replace("{n}", String(data.value.changed ?? 0)) });
+            const failed = Array.isArray(data.value.failed) ? data.value.failed.length : 0;
+            const changed = data.value.changed ?? 0;
+            setNotice({
+              text: failed > 0 ? t("bulkPartial").replace("{n}", String(changed)).replace("{m}", String(failed)) : t("bulkDone").replace("{n}", String(changed)),
+            });
             broadcastSync();
           }
         } catch (error) {
