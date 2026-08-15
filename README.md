@@ -1,21 +1,39 @@
 # plugin-switch
 
+[![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![release](https://img.shields.io/github/v/release/cynch18/plugin-switch)](https://github.com/cynch18/plugin-switch/releases/latest)
 [![test](https://github.com/cynch18/plugin-switch/actions/workflows/test.yml/badge.svg)](https://github.com/cynch18/plugin-switch/actions/workflows/test.yml)
 
-给 DeepSeek Harness (DSH) 的**插件清单页加上开关**：点一下即可启用/停用任何插件，立即生效、不用重启服务端，重启后状态保持。
+[English](README.en.md) | 中文
+
+给 DeepSeek Harness (DSH) 的**插件清单页加上滑块开关**：点一下即可启用/停用任何插件，立即生效、不用重启服务端，重启后状态保持。
+
+## 功能
+
+- 实时启停（主动重放通道，绕开平台 watcher 死锁，确定性生效）
+- 分组（系统/第三方/本地）、状态筛选、排序、搜索
+- 批量启用/停用（单事务：一次备份，撤销一步全回）
+- 撤销 + 自动备份（保留最近 20 份）
+- 关键条目强确认、停用来源分层、config 预览、失败诊断
+- 多标签页实时同步、CLI 恢复工具、双语界面与动画
 
 ## 快速开始
 
-**方式一：直接下载（推荐，不用 git）**
+**方式一：`dsh plugin add`（推荐）**
 
-在 [Releases](https://github.com/cynch18/plugin-switch/releases/latest) 下载 `plugin-switch.zip`，解压后在解压目录运行：
+```sh
+dsh plugin --profile web add dsh-profile-plugin-switch
+```
+
+**方式二：直接下载（不用 git）**
+
+在 [Releases](https://github.com/cynch18/plugin-switch/releases/latest) 下载 `plugin-switch.zip`，解压后运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-**方式二：git clone**
+**方式三：git clone**
 
 ```powershell
 git clone https://github.com/cynch18/plugin-switch.git
@@ -23,17 +41,9 @@ cd plugin-switch
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-然后**重启 dsh web**，打开 GUI 按 `Ctrl+Shift+R` 刷新 → **设置 → 插件 → 插件清单**，每个插件右侧就是滑块开关。
+然后**重启 dsh web**，按 `Ctrl+Shift+R` 刷新 → **设置 → 插件 → 插件清单**，每个插件右侧就是滑块开关。
 
-> 就这么三步。装完把 clone 下来的目录删掉也行，插件已复制到 DSH 的配置目录里。
-
-## 安装脚本选项
-
-| 命令 | 用途 |
-|------|------|
-| `install.ps1` | 默认安装（替换原只读清单为带开关版） |
-| `install.ps1 -KeepOriginal` | 保留原只读清单（仅启用 HTTP API，开关页不显示） |
-| `install.ps1 -Dev` | 开发模式：junction 指向本仓库，改代码直接生效 |
+> 方式二/三的 `-KeepOriginal` 参数保留原只读清单（仅启用 HTTP API）；`-Dev` 参数建 junction 指向源码，改代码直接生效。
 
 ## 卸载 / 恢复原版
 
@@ -51,7 +61,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 ```bash
 npm install
-npm test   # applyPatchEdit 单元测试（10 用例）
+npm test   # 单元测试（applyPatchEdit / 备份轮换 / 来源判定 / baked-disabled scrub）
 ```
 
 ## License
