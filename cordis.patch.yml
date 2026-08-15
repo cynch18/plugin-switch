@@ -1,0 +1,6 @@
+# dsh-profile-plugin-switch bundle patch (used by `dsh plugin add` installs).
+# The install.ps1 path writes the same row into the profile's own
+# cordis.patch.yml instead — use one installation method, not both.
+- insert:
+    - id: plugin-switch
+      name: dsh-profile-plugin-switch
