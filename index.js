@@ -105,21 +105,37 @@ export async function pruneBackups(backupsDir, limit = 20) {
   return excess;
 }
 
-/** 把当前 patch 文件备份进 backupsDir 并轮换。 */
+/** 把当前 patch 文件备份进 backupsDir 并轮换；返回备份文件名。 */
 export async function writeBackup(patchPath, backupsDir, now = new Date()) {
   await mkdir(backupsDir, { recursive: true });
-  await copyFile(patchPath, join(backupsDir, backupFileName(now)));
+  const name = backupFileName(now);
+  await copyFile(patchPath, join(backupsDir, name));
   await pruneBackups(backupsDir);
+  return name;
+}
+
+/** 备份目录里的备份文件名（升序，最新的在最后）。 */
+export async function listBackupFiles(backupsDir) {
+  try {
+    return (await readdir(backupsDir)).filter(isBackupFile).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** 用指定备份内容覆盖 patch 文件。 */
+export async function restoreBackupContent(patchPath, backupsDir, backupName) {
+  const content = await readFile(join(backupsDir, backupName), "utf8");
+  // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
+  await writeFile(patchPath, content, "utf8");
 }
 
 /** 用最新备份覆盖 patch 文件，返回被恢复的备份文件名。 */
 export async function restoreLatestBackup(patchPath, backupsDir) {
-  const files = (await readdir(backupsDir)).filter(isBackupFile).sort();
+  const files = await listBackupFiles(backupsDir);
   if (files.length === 0) throw new Error("no backups available");
   const latest = files[files.length - 1];
-  const content = await readFile(join(backupsDir, latest), "utf8");
-  // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
-  await writeFile(patchPath, content, "utf8");
+  await restoreBackupContent(patchPath, backupsDir, latest);
   return latest;
 }
 
@@ -211,6 +227,10 @@ function findMatches(ctx, id) {
 // ── 插件主体 ──────────────────────────────────────────────────────────────
 export function apply(ctx) {
   const patchPath = resolvePatchPath();
+
+  // 操作日志：每次 toggle/bulk 成功后记录（备份文件名 + 每个条目的原状态），
+  // undo 据此做内存级反向 + 文件恢复，不依赖 watcher 重放是否生效。
+  const operationLog = [];
   if (patchPath === undefined) {
     console.error("plugin-switch: cordis.patch.yml not found at either candidate location; toggle will fail");
   }
@@ -308,7 +328,7 @@ export function apply(ctx) {
             let okChanges = [];
             if (patchPath !== undefined && backupsDir !== undefined) {
               try {
-                await writeBackup(patchPath, backupsDir);
+                const backupName = await writeBackup(patchPath, backupsDir);
                 // 先纯文本预计算每条目标内容，失败的条目剔除（如 !!js 表达式）。
                 let content = await readFile(patchPath, "utf8");
                 for (const change of changes) {
@@ -338,6 +358,7 @@ export function apply(ctx) {
                   }
                   // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
                   await writeFile(patchPath, content, "utf8");
+                  operationLog.push({ backup: backupName, changes: okChanges.map((change) => ({ id: change.entry.id, prevEnabled: !change.want })) });
                 }
                 persisted = true;
               } catch (error) {
@@ -377,8 +398,34 @@ export function apply(ctx) {
           }
           inFlight = true;
           try {
+            const op = operationLog.pop();
+            if (op !== undefined) {
+              // 操作级撤销：恢复对应备份文件 + 内存反向（不依赖 watcher 重放）。
+              let restored;
+              try {
+                await restoreBackupContent(patchPath, backupsDir, op.backup);
+                restored = op.backup;
+              } catch {
+                // 备份已被轮换清理 → 退回最新备份（纯文件语义）。
+                restored = await restoreLatestBackup(patchPath, backupsDir);
+              }
+              let reverted = 0;
+              for (const change of op.changes) {
+                const matches = findMatches(ctx, change.id);
+                if (matches.length !== 1) continue;
+                try {
+                  await matches[0].update({ disabled: !change.prevEnabled });
+                  reverted += 1;
+                } catch {
+                  // 个别条目反向失败（如服务冲突）不影响整体撤销。
+                }
+              }
+              sendJson(res, 200, { ok: true, value: { restored, reverted, total: op.changes.length } });
+              return;
+            }
+            // 无操作日志（如重启后）→ 纯文件恢复，依赖 watcher 重放。
             const restored = await restoreLatestBackup(patchPath, backupsDir);
-            sendJson(res, 200, { ok: true, value: { restored } });
+            sendJson(res, 200, { ok: true, value: { restored, reverted: 0, total: 0 } });
           } catch (error) {
             sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
           } finally {
@@ -442,12 +489,13 @@ export function apply(ctx) {
             let persistError;
             if (patchPath !== undefined && backupsDir !== undefined) {
               try {
-                await writeBackup(patchPath, backupsDir);
+                const backupName = await writeBackup(patchPath, backupsDir);
                 const content = await readFile(patchPath, "utf8");
                 const next = applyPatchEdit(content, entry.options.id, !enabled);
                 // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
                 await writeFile(patchPath, next, "utf8");
                 persisted = true;
+                operationLog.push({ backup: backupName, changes: [{ id: entry.id, prevEnabled: before }] });
               } catch (error) {
                 persistError = error instanceof Error ? error.message : String(error);
               }
