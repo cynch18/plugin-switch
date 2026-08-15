@@ -226,6 +226,19 @@ test("mergedInjectOf includes code-level inject from the fiber runtime", () => {
   assert.deepStrictEqual(dependents, ["include:web-runtime"], "code-level inject makes it a dependent");
 });
 
+test("mergedInjectOf reads the resolved fiber inject table", () => {
+  // cordis registry.plugin resolves the plugin's inject into fiber.inject
+  // (service name -> null/config) regardless of plugin shape.
+  const entry = {
+    id: "include:plugin-switch",
+    options: { name: "z" },
+    fiber: { inject: { loader: null, webServer: null } },
+  };
+  assert.deepStrictEqual(mergedInjectOf(entry), ["loader", "webServer"], "fiber table wins for object plugins");
+  const dependents = dependentsOf([entry], ["webserver", "include:webserver"]);
+  assert.deepStrictEqual(dependents, ["include:plugin-switch"]);
+});
+
 test("mergedInjectOf tolerates missing fiber and non-array inject", () => {
   assert.deepStrictEqual(mergedInjectOf({ options: { name: "a" } }), []);
   assert.deepStrictEqual(mergedInjectOf({ options: { name: "a", inject: { x: 1, y: 2 } } }), ["x", "y"]);

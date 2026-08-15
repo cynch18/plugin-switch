@@ -210,11 +210,28 @@ function pluginInjectOf(entry) {
   return [];
 }
 
-/** 合并条目行 inject 与插件代码层 inject（去重、保序）。 */
+/**
+ * fiber 上已解析的注入表（服务名 → 配置/null），cordis 的 Inject.resolve 产物。
+ * 最可靠的来源：无论插件是类、函数还是 {apply} 对象，registry.plugin 都会
+ * 解析其 inject 存入 fiber.inject。
+ */
+function fiberInjectOf(entry) {
+  try {
+    const inject = entry.fiber?.inject;
+    if (inject === undefined || inject === null) return [];
+    if (Array.isArray(inject)) return inject;
+    if (typeof inject === "object") return Object.keys(inject);
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+/** 合并条目行 inject、插件代码层 inject 与 fiber 解析表（去重、保序）。 */
 export function mergedInjectOf(entry) {
   const seen = new Set();
   const result = [];
-  for (const name of [...injectOf(entry), ...pluginInjectOf(entry)]) {
+  for (const name of [...injectOf(entry), ...pluginInjectOf(entry), ...fiberInjectOf(entry)]) {
     if (seen.has(name)) continue;
     seen.add(name);
     result.push(name);
