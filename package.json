@@ -1,6 +1,6 @@
 {
   "name": "dsh-profile-plugin-switch",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "DeepSeek Harness (DSH) web plugin: toggle any plugin on/off from the GUI, live, without restarting the server.",
   "license": "MIT",
   "author": "CYNCH18",

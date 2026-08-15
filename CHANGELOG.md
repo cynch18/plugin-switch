@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.1] - 2026-08-15
+
+- Fixed dependents matching for object plugins: merge the resolved `fiber.inject` table (service name → config) so code-level dependencies surface regardless of plugin shape (class/function/{apply}-object)
+
 ## [0.5.0] - 2026-08-15
 
 - Fixed the bundle patch so `dsh plugin add` installs show the toggle page (the two inventory disables were missing)
