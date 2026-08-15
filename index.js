@@ -254,6 +254,76 @@ function findMatches(ctx, id) {
   return matches;
 }
 
+// ── 主动重放通道（学习自 dsh-web-plugin-manager 的 live.ts） ─────────────
+// 平台的 patch watcher 在重放时卸载 HMR 依赖的行（如 timer）会死锁，之后所有
+// patch 变更被静默忽略。这里绕过 watcher，直接对 loader 的 include 条目调
+// entry.update({config:{patches}})——与平台 watchUserPatches 同通道，确定性生效。
+
+/** 找到 loader 树的根 include 条目（id 为 "include"，config 带 patches 栈）。 */
+function findIncludeEntry(ctx) {
+  for (const entry of ctx.loader.entries()) {
+    if (entry.id !== "include") continue;
+    const config = entry.options?.config;
+    if (config === undefined || !Array.isArray(config.patches)) continue;
+    return entry;
+  }
+  return undefined;
+}
+
+/** 加载 js-yaml：裸 import 优先，失败则走 DSH 自带的 profiles/node_modules fallback。 */
+let yamlModule;
+async function loadYaml() {
+  if (yamlModule !== undefined) return yamlModule;
+  try {
+    yamlModule = await import("js-yaml");
+  } catch {
+    try {
+      const { homedir } = await import("node:os");
+      const { pathToFileURL } = await import("node:url");
+      const home = process.env.DSH_HOME ?? join(homedir(), ".dsh");
+      yamlModule = await import(pathToFileURL(join(home, "profiles", "node_modules", "js-yaml", "index.js")).href);
+    } catch {
+      yamlModule = null;
+    }
+  }
+  return yamlModule;
+}
+
+/** 收集补丁栈里出现过的所有条目 id（顶层行与 insert 子行）。 */
+export function collectRowIds(stack) {
+  const ids = new Set();
+  for (const row of stack ?? []) {
+    if (row && typeof row === "object") {
+      if (typeof row.id === "string") ids.add(row.id);
+      if (Array.isArray(row.insert)) {
+        for (const child of row.insert) {
+          if (child && typeof child.id === "string") ids.add(child.id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * 纯函数：清除 others（非 profile 行）里被 bake 的 disabled 值。
+ * applyEntryPatches 会把 override 原地写进 insert 子行；当文件里已没有该 id 的
+ * 行时（undo 恢复），baked 值会让条目永远停在旧状态——这里把这类 baked 值删掉，
+ * 让条目回到 bundle 层原始状态。
+ */
+export function scrubBakedDisabled(others, rowIds, scrubIds) {
+  const clone = structuredClone(others);
+  for (const row of clone) {
+    if (!row || typeof row !== "object" || !Array.isArray(row.insert)) continue;
+    for (const child of row.insert) {
+      if (child && typeof child.id === "string" && scrubIds.has(child.id) && !rowIds.has(child.id)) {
+        delete child.disabled;
+      }
+    }
+  }
+  return clone;
+}
+
 // ── 插件主体 ──────────────────────────────────────────────────────────────
 export function apply(ctx) {
   const patchPath = resolvePatchPath();
@@ -261,6 +331,9 @@ export function apply(ctx) {
   // 操作日志：每次 toggle/bulk 成功后记录（备份文件名 + 每个条目的原状态），
   // undo 据此做内存级反向 + 文件恢复，不依赖 watcher 重放是否生效。
   const operationLog = [];
+  // 主动重放状态：others = 非 profile 行的干净捕获；scrubIds = 我们写过的条目 id。
+  let othersCache;
+  let scrubIds = new Set();
   if (patchPath === undefined) {
     console.error("plugin-switch: cordis.patch.yml not found at either candidate location; toggle will fail");
   }
@@ -274,6 +347,53 @@ export function apply(ctx) {
       return readdirSync(backupsDir).some(isBackupFile);
     } catch {
       return false;
+    }
+  };
+
+  /**
+   * 主动重放：读 patch 文件 → 组装补丁栈（非 profile 行 + 文件行）→ include 条目
+   * update。绕过平台 watcher（其重放会因 HMR 依赖死锁而静默失效），确定性生效。
+   */
+  const recompose = async () => {
+    const entry = findIncludeEntry(ctx);
+    if (entry === undefined) return { ok: false, message: "no include entry" };
+    if (patchPath === undefined) return { ok: false, message: "patch file not found" };
+    const yaml = await loadYaml();
+    if (yaml === null || yaml.default === undefined) return { ok: false, message: "js-yaml unavailable" };
+    let content;
+    try {
+      content = await readFile(patchPath, "utf8");
+    } catch (error) {
+      return { ok: false, message: `read patch failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    let rows;
+    try {
+      rows = (yaml.default.load ?? yaml.load)(content);
+    } catch (error) {
+      return { ok: false, message: `parse patch failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    if (!Array.isArray(rows)) return { ok: false, message: "patch file is not a list" };
+    const config = entry.options.config;
+    const stack = config?.patches;
+    if (!Array.isArray(stack)) return { ok: false, message: "no patch stack" };
+    if (othersCache === undefined) {
+      const needle = new Set(rows.map((row) => JSON.stringify(row)));
+      othersCache = structuredClone(stack.filter((row) => !needle.has(JSON.stringify(row))));
+    }
+    const rowIds = collectRowIds(rows);
+    const others = scrubBakedDisabled(othersCache, rowIds, scrubIds);
+    const { patches: _ignored, ...rest } = config;
+    const next = [...others, ...structuredClone(rows)];
+    const task = entry.update({ config: { ...rest, patches: next } });
+    try {
+      await Promise.race([
+        task,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("live apply timed out")), 5000)),
+      ]);
+      return { ok: true };
+    } catch (error) {
+      console.error("plugin-switch: recompose failed:", error instanceof Error ? error.message : String(error));
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
     }
   };
 
@@ -362,6 +482,7 @@ export function apply(ctx) {
             // 一个批量 = 一个事务：一次备份（undo 一步全回）。
             let persisted = false;
             let persistError;
+            let live = { ok: false };
             const failures = [];
             let okChanges = [];
             if (patchPath !== undefined && backupsDir !== undefined) {
@@ -396,7 +517,9 @@ export function apply(ctx) {
                   }
                   // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
                   await writeFile(patchPath, content, "utf8");
+                  scrubIds = new Set([...scrubIds, ...okChanges.map((change) => change.entry.options.id)]);
                   operationLog.push({ backup: backupName, changes: okChanges.map((change) => ({ id: change.entry.id, prevEnabled: !change.want })) });
+                  live = await recompose();
                 }
                 persisted = true;
               } catch (error) {
@@ -412,6 +535,7 @@ export function apply(ctx) {
                 changed: okChanges.length,
                 failed: failures,
                 persisted,
+                live: live.ok,
                 ...(persistError !== undefined ? { persistError } : {}),
               },
             });
@@ -438,7 +562,7 @@ export function apply(ctx) {
           try {
             const op = operationLog.pop();
             if (op !== undefined) {
-              // 操作级撤销：恢复对应备份文件 + 内存反向（不依赖 watcher 重放）。
+              // 操作级撤销：恢复对应备份文件 → 主动重放 → 内存反向兜底。
               let restored;
               try {
                 await restoreBackupContent(patchPath, backupsDir, op.backup);
@@ -447,6 +571,7 @@ export function apply(ctx) {
                 // 备份已被轮换清理 → 退回最新备份（纯文件语义）。
                 restored = await restoreLatestBackup(patchPath, backupsDir);
               }
+              const live = await recompose();
               let reverted = 0;
               for (const change of op.changes) {
                 const matches = findMatches(ctx, change.id);
@@ -458,12 +583,13 @@ export function apply(ctx) {
                   // 个别条目反向失败（如服务冲突）不影响整体撤销。
                 }
               }
-              sendJson(res, 200, { ok: true, value: { restored, reverted, total: op.changes.length } });
+              sendJson(res, 200, { ok: true, value: { restored, reverted, total: op.changes.length, live: live.ok } });
               return;
             }
-            // 无操作日志（如重启后）→ 纯文件恢复，依赖 watcher 重放。
+            // 无操作日志（如重启后）→ 纯文件恢复 + 主动重放。
             const restored = await restoreLatestBackup(patchPath, backupsDir);
-            sendJson(res, 200, { ok: true, value: { restored, reverted: 0, total: 0 } });
+            const live = await recompose();
+            sendJson(res, 200, { ok: true, value: { restored, reverted: 0, total: 0, live: live.ok } });
           } catch (error) {
             sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
           } finally {
@@ -525,6 +651,7 @@ export function apply(ctx) {
             // 2) 持久化到补丁层（写前自动备份）。
             let persisted = false;
             let persistError;
+            let live = { ok: false };
             if (patchPath !== undefined && backupsDir !== undefined) {
               try {
                 const backupName = await writeBackup(patchPath, backupsDir);
@@ -533,7 +660,9 @@ export function apply(ctx) {
                 // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
                 await writeFile(patchPath, next, "utf8");
                 persisted = true;
+                scrubIds = new Set([...scrubIds, entry.options.id]);
                 operationLog.push({ backup: backupName, changes: [{ id: entry.id, prevEnabled: before }] });
+                live = await recompose();
               } catch (error) {
                 persistError = error instanceof Error ? error.message : String(error);
               }
@@ -550,6 +679,7 @@ export function apply(ctx) {
                 before,
                 after,
                 persisted,
+                live: live.ok,
                 ...(persistError !== undefined ? { persistError } : {}),
               },
             });

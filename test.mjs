@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyPatchEdit, backupFileName, isBackupFile, patchHasRow, pruneBackups } from "./index.js";
+import { applyPatchEdit, backupFileName, collectRowIds, isBackupFile, patchHasRow, pruneBackups, scrubBakedDisabled } from "./index.js";
 
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
@@ -166,6 +166,33 @@ test("patchHasRow detects top-level and nested rows", () => {
   assert.ok(patchHasRow("- insert:\n    - id: y\n", "y"));
   assert.ok(!patchHasRow("- id: xy\n", "x"), "no prefix false match");
   assert.ok(patchHasRow("- id: my.plugin\n", "my.plugin"), "regex-special id");
+});
+
+// ── 主动重放（学习自 dsh-web-plugin-manager）──
+test("collectRowIds gathers top-level and insert ids", () => {
+  const ids = collectRowIds([
+    { id: "a" },
+    { insert: [{ id: "b" }, { id: "c" }] },
+    { id: "d", insert: [{ id: "e" }] },
+  ]);
+  assert.deepStrictEqual([...ids].sort(), ["a", "b", "c", "d", "e"]);
+});
+
+test("scrubBakedDisabled removes baked values only for absent scrubbed ids", () => {
+  const others = [
+    { insert: [{ id: "tool-bash", disabled: false }, { id: "hmr", disabled: true }, { id: "other", disabled: true }] },
+  ];
+  const out = scrubBakedDisabled(others, new Set(["other"]), new Set(["tool-bash", "hmr"]));
+  assert.strictEqual(out[0].insert[0].disabled, undefined, "scrubbed baked false");
+  assert.strictEqual(out[0].insert[1].disabled, undefined, "scrubbed baked true");
+  assert.strictEqual(out[0].insert[2].disabled, true, "present-in-file row untouched");
+  assert.strictEqual(others[0].insert[0].disabled, false, "input not mutated");
+});
+
+test("scrubBakedDisabled keeps baked value when the id is still in the file", () => {
+  const others = [{ insert: [{ id: "tool-bash", disabled: false }] }];
+  const out = scrubBakedDisabled(others, new Set(["tool-bash"]), new Set(["tool-bash"]));
+  assert.strictEqual(out[0].insert[0].disabled, false, "override in file wins, baked value kept");
 });
 
 if (process.exitCode) {
