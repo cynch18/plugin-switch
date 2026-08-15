@@ -43,7 +43,33 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 Then **restart dsh web**, press `Ctrl+Shift+R`, and go to **Settings → Plugins → Plugin list** — every plugin row has a slider switch on the right.
 
+> ⚠️ **Pick ONE installation method**: `dsh plugin add`, the zip, and install.ps1 must not be combined — installing twice in the same profile creates duplicate rows and the profile fails to start.
+>
 > Options 2/3 accept `-KeepOriginal` (keep the original read-only inventory; HTTP API only) and `-Dev` (junction to the source tree for live development).
+
+## FAQ
+
+**Q: I disabled the plugin switch itself and the page disappeared — how do I get it back?**
+
+Open `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`, find the `plugin-switch` entry, and change `disabled: true` back to `false` (or delete the line). It takes effect within ~3 seconds, no restart needed.
+
+**Q: Toggling does nothing?**
+
+Restart dsh web and try again; if it still fails, see Troubleshooting below.
+
+**Q: I made a mistake — can I roll back?**
+
+The "↺ Undo" button restores the configuration from the backup taken before your last toggle (every toggle is backed up automatically; the latest 20 are kept).
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| Toggle page missing | Use only one install method, restart dsh, hard-refresh (Ctrl+Shift+R); check that `ui-settings-plugin-inventory` and `plugin-inventory` are `disabled: true` in `cordis.patch.yml` |
+| State does not change | Restart dsh web and retry |
+| Host errors | Check the dsh launcher window log (loader apply/error lines) |
+| GUI unreachable | Use the CLI recovery tool: `node scripts/dsh-plugin-fix.mjs list / enable <id> / disable <id> / undo / backups` (run from the repo directory) |
+| Config file broken | Backups live in `%USERPROFILE%\.dsh\profiles\web\backups\`; copy the latest one back to `cordis.patch.yml` |
 
 ## Uninstall / restore the original list
 

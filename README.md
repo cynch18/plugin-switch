@@ -43,7 +43,33 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 然后**重启 dsh web**，按 `Ctrl+Shift+R` 刷新 → **设置 → 插件 → 插件清单**，每个插件右侧就是滑块开关。
 
+> ⚠️ **三种方式任选其一**：`dsh plugin add`、zip、install.ps1 不要重复安装（同一 profile 装两次会产生重复条目，重启报错）。
+>
 > 方式二/三的 `-KeepOriginal` 参数保留原只读清单（仅启用 HTTP API）；`-Dev` 参数建 junction 指向源码，改代码直接生效。
+
+## 常见问题（FAQ）
+
+**Q：我把"插件开关"自己关了，页面消失了，怎么恢复？**
+
+打开 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`，找到 `plugin-switch` 条目，把 `disabled: true` 改回 `false`（或删掉这一行），保存后约 3 秒自动生效，无需重启。
+
+**Q：开关点了没反应？**
+
+重启 dsh web 再试；若仍无效，见下方故障排查。
+
+**Q：误操作了想回退？**
+
+页面上的"↺ 撤销"按钮恢复到上一次开关前的配置（每次开关前自动备份，保留最近 20 份）。
+
+## 故障排查
+
+| 症状 | 处理 |
+|------|------|
+| 开关页没出现 | 确认只用了一种安装方式、已重启 dsh、已强制刷新（Ctrl+Shift+R）；检查 `cordis.patch.yml` 里 `ui-settings-plugin-inventory` 与 `plugin-inventory` 两行是 `disabled: true` |
+| 开关后状态没变 | 重启 dsh web 再试 |
+| 服务端报错 | 看 dsh 启动窗口日志（loader apply/error 行） |
+| 无法打开 GUI | 用 CLI 恢复工具：`node scripts/dsh-plugin-fix.mjs list / enable <id> / disable <id> / undo / backups`（在仓库目录运行） |
+| 配置文件损坏 | 备份在 `%USERPROFILE%\.dsh\profiles\web\backups\`，把最新一份复制回 `cordis.patch.yml` 即可 |
 
 ## 卸载 / 恢复原版
 
