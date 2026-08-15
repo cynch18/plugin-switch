@@ -51,6 +51,7 @@ window.__ModuleLoader__.load({
       bulkDisableConfirm: "确认停用 {n} 个插件？关键插件（{m} 个）已自动跳过。",
       bulkNothing: "没有可批量操作的插件（关键插件需单独操作）。",
       bulkDone: "批量完成：{n} 个成功。",
+      bulkFailed: "批量操作失败",
       criticalApiGateway: "停用 api-gateway 将断开 GUI 与后端的通信，页面将失去响应。确定继续？",
       criticalWebserver: "停用 webserver 将关闭本插件与 GUI 的 HTTP 服务。确定继续？",
       criticalModules: "停用 modules 将移除浏览器插件加载机制，刷新后所有界面插件失效。确定继续？",
@@ -102,6 +103,7 @@ window.__ModuleLoader__.load({
       bulkDisableConfirm: "Disable {n} plugins? Critical plugins ({m}) are skipped automatically.",
       bulkNothing: "Nothing to bulk-toggle (critical plugins must be toggled individually).",
       bulkDone: "Bulk done: {n} succeeded.",
+      bulkFailed: "Bulk operation failed",
       criticalApiGateway: "Disabling api-gateway severs the GUI's connection to the backend and the page will stop responding. Continue?",
       criticalWebserver: "Disabling webserver shuts down the HTTP service used by this plugin and the GUI. Continue?",
       criticalModules: "Disabling modules removes the browser plugin loading mechanism; all UI plugins stop working after a refresh. Continue?",
@@ -336,7 +338,7 @@ window.__ModuleLoader__.load({
         { key: "local", label: t("groupLocal"), items: entries.filter((entry) => groupOf(entry) === "local") },
       ].filter((group) => group.items.length > 0);
 
-      // 批量操作：作用于当前筛选/搜索结果，跳过关键条目。
+      // 批量操作：单个事务（一次备份、撤销一步全回）。作用于当前筛选/搜索结果，跳过关键条目。
       const bulk = async (enabled) => {
         const targets = entries.filter((entry) => entry.enabled !== enabled && !isCritical(entry));
         const skipped = entries.filter((entry) => entry.enabled !== enabled && isCritical(entry)).length;
@@ -348,15 +350,25 @@ window.__ModuleLoader__.load({
         if (!window.confirm(message)) return;
         setBulkRunning(true);
         setNotice(null);
-        let done = 0;
-        for (const entry of targets) {
-          const result = await toggleOne(entry, true);
-          if (!result.ok) break;
-          done += 1;
+        try {
+          const res = await fetch("/plugin-switch/bulk", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ entries: targets.map((entry) => ({ id: entry.entryId, enabled })) }),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            setNotice({ kind: "error", text: `${t("bulkFailed")}: ${data.error ?? ""}` });
+          } else {
+            setNotice({ text: t("bulkDone").replace("{n}", String(data.value.changed ?? 0)) });
+            broadcastSync();
+          }
+        } catch (error) {
+          setNotice({ kind: "error", text: `${t("bulkFailed")}: ${error instanceof Error ? error.message : String(error)}` });
+        } finally {
+          setBulkRunning(false);
+          await load();
         }
-        setBulkRunning(false);
-        setNotice({ text: t("bulkDone").replace("{n}", String(done)) });
-        await load();
       };
 
       const renderCard = (entry) => {

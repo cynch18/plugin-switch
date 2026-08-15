@@ -259,6 +259,90 @@ export function apply(ctx) {
           return;
         }
 
+        if (pathname === "/plugin-switch/bulk") {
+          if (req.method !== "POST") {
+            sendJson(res, 405, { ok: false, error: "method not allowed" });
+            return;
+          }
+          if (inFlight) {
+            sendJson(res, 409, { ok: false, error: "busy: another operation is in progress" });
+            return;
+          }
+          const body = await readBody(req);
+          let parsed;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+            return;
+          }
+          const { entries } = parsed ?? {};
+          if (!Array.isArray(entries) || entries.length === 0 || entries.some((item) => typeof item?.id !== "string" || typeof item?.enabled !== "boolean")) {
+            sendJson(res, 400, { ok: false, error: "body must be {entries: [{id: string, enabled: boolean}]}" });
+            return;
+          }
+
+          inFlight = true;
+          try {
+            // 校验：所有 id 唯一命中、非 group。
+            const changes = [];
+            for (const item of entries) {
+              const matches = findMatches(ctx, item.id);
+              if (matches.length !== 1) {
+                sendJson(res, 400, { ok: false, error: `invalid entry "${item.id}": ${matches.length === 0 ? "not found" : "ambiguous"}` });
+                return;
+              }
+              const entry = matches[0];
+              if (!entry.disabled === item.enabled) continue; // 已处于目标状态
+              changes.push({ entry, want: item.enabled });
+            }
+            if (changes.length === 0) {
+              sendJson(res, 200, { ok: true, value: { changed: 0, persisted: true } });
+              return;
+            }
+
+            // 一个批量 = 一个事务：一次备份（undo 一步全回）。
+            let persisted = false;
+            let persistError;
+            let nextContent;
+            if (patchPath !== undefined && backupsDir !== undefined) {
+              try {
+                await writeBackup(patchPath, backupsDir);
+                nextContent = await readFile(patchPath, "utf8");
+                for (const change of changes) {
+                  nextContent = applyPatchEdit(nextContent, change.entry.options.id, !change.want);
+                }
+              } catch (error) {
+                persistError = error instanceof Error ? error.message : String(error);
+              }
+            } else {
+              persistError = "patch file not found";
+            }
+
+            // 纯文本叠加全部成功后，再动内存；文件最后一次性写入。
+            if (persistError === undefined) {
+              for (const change of changes) {
+                await change.entry.update({ disabled: !change.want });
+              }
+              try {
+                // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
+                await writeFile(patchPath, nextContent, "utf8");
+                persisted = true;
+              } catch (error) {
+                persistError = error instanceof Error ? error.message : String(error);
+              }
+            }
+
+            sendJson(res, 200, {
+              ok: true,
+              value: { changed: changes.length, persisted, ...(persistError !== undefined ? { persistError } : {}) },
+            });
+          } finally {
+            inFlight = false;
+          }
+          return;
+        }
+
         if (pathname === "/plugin-switch/undo") {
           if (req.method !== "POST") {
             sendJson(res, 405, { ok: false, error: "method not allowed" });
