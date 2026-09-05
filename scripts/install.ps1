@@ -53,15 +53,15 @@ if (-not (Test-Path $patch)) {
 $content = [System.IO.File]::ReadAllText($patch)
 $add = New-Object System.Collections.Generic.List[string]
 
-if ($content -notmatch "id:\s*plugin-switch") {
+if ($content -notmatch "(?m)^\s*- id:\s*plugin-switch\s*$") {
   $add.Add("- insert:`r`n    - id: plugin-switch`r`n      name: dsh-profile-plugin-switch")
 }
 if (-not $KeepOriginal) {
   # Replace the read-only inventory with the toggle version: disable both original rows.
-  if ($content -notmatch "id:\s*ui-settings-plugin-inventory") {
+  if ($content -notmatch "(?m)^\s*- id:\s*ui-settings-plugin-inventory\s*$") {
     $add.Add("- id: ui-settings-plugin-inventory`r`n  disabled: true")
   }
-  if ($content -notmatch "id:\s*plugin-inventory") {
+  if ($content -notmatch "(?m)^\s*- id:\s*plugin-inventory\s*$") {
     $add.Add("- id: plugin-inventory`r`n  disabled: true")
   }
 }

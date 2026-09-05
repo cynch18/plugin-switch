@@ -20,8 +20,14 @@ if (-not (Test-Path $profileDir)) {
 
 # 1) Copy the plugin package into profiles\web\node_modules\
 $target = Join-Path $profileDir "node_modules\dsh-profile-plugin-switch"
+# Remove any previous install first: Copy-Item onto an existing directory would
+# nest the package one level deeper (classic PowerShell pitfall).
+if (Test-Path $target) {
+  Remove-Item $target -Recurse -Force
+}
 New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
-Copy-Item (Join-Path $PSScriptRoot "dsh-profile-plugin-switch") $target -Recurse -Force
+New-Item -ItemType Directory -Path $target -Force | Out-Null
+Copy-Item (Join-Path $PSScriptRoot "dsh-profile-plugin-switch\*") $target -Recurse -Force
 Write-Host "[1/2] package copied to: $target"
 
 # 2) Update cordis.patch.yml
@@ -32,14 +38,14 @@ if (-not (Test-Path $patch)) {
 $content = [System.IO.File]::ReadAllText($patch)
 $add = New-Object System.Collections.Generic.List[string]
 
-if ($content -notmatch "id:\s*plugin-switch") {
+if ($content -notmatch "(?m)^\s*- id:\s*plugin-switch\s*$") {
   $add.Add("- insert:`r`n    - id: plugin-switch`r`n      name: dsh-profile-plugin-switch")
 }
 if (-not $KeepOriginal) {
-  if ($content -notmatch "id:\s*ui-settings-plugin-inventory") {
+  if ($content -notmatch "(?m)^\s*- id:\s*ui-settings-plugin-inventory\s*$") {
     $add.Add("- id: ui-settings-plugin-inventory`r`n  disabled: true")
   }
-  if ($content -notmatch "id:\s*plugin-inventory") {
+  if ($content -notmatch "(?m)^\s*- id:\s*plugin-inventory\s*$") {
     $add.Add("- id: plugin-inventory`r`n  disabled: true")
   }
 }

@@ -14,17 +14,11 @@ function parse(text) {
   return yaml.load(text);
 }
 
-let passed = 0;
+// 收集后统一顺序执行：必须 await——同步调用 async 测试函数永不同步抛错，
+// 会立即误报 ok，真正的断言失败则变成 unhandled rejection。
+const tests = [];
 function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    console.error(`FAIL - ${name}`);
-    console.error(error);
-    process.exitCode = 1;
-  }
+  tests.push({ name, fn });
 }
 
 const HEADER = "# user patch layer\n# keep comments\n";
@@ -131,8 +125,6 @@ test("no false prefix match", () => {
   parse(out);
 });
 
-console.log(`\n${passed} passed`);
-
 // ── 备份（P2.1）──
 test("backup file naming and recognition", () => {
   const name = backupFileName(new Date(2026, 0, 2, 3, 4, 5, 6));
@@ -195,6 +187,16 @@ test("scrubBakedDisabled keeps baked value when the id is still in the file", ()
   assert.strictEqual(out[0].insert[0].disabled, false, "override in file wins, baked value kept");
 });
 
+// ── 末尾换行保持 ──
+test("append preserves the file's trailing-newline convention", () => {
+  const lf = applyPatchEdit("- id: web-app\n  disabled: true\n", "other", true);
+  assert.ok(lf.endsWith("- id: other\n  disabled: true\n"), "LF append ends with newline");
+  const crlf = applyPatchEdit("- id: web-app\r\n  disabled: true\r\n", "other", true);
+  assert.ok(crlf.endsWith("- id: other\r\n  disabled: true\r\n"), "CRLF append ends with CRLF");
+  const noNl = applyPatchEdit("- id: web-app\n  disabled: true", "other", true);
+  assert.ok(!noNl.endsWith("\n"), "input without trailing newline stays without");
+});
+
 // ── 依赖预警（P5.4）──
 test("normalizeName aligns service names with kebab ids", () => {
   assert.strictEqual(normalizeName("webServer"), "webserver");
@@ -245,6 +247,37 @@ test("mergedInjectOf tolerates missing fiber and non-array inject", () => {
   assert.deepStrictEqual(mergedInjectOf({ options: { name: "a", inject: ["z"] }, fiber: { runtime: { callback: null } } }), ["z"]);
 });
 
-if (process.exitCode) {
+// ── 行尾（CRLF 保持）──
+test("CRLF line endings are preserved on replace, insert and append", () => {
+  const replaced = applyPatchEdit("- id: web-app\r\n  disabled: true\r\n", "web-app", false);
+  assert.ok(replaced.includes("disabled: false\r\n"), "replaced line keeps CRLF");
+  assert.ok(!replaced.includes("disabled: false\n"), "no mixed EOL after replace");
+  parse(replaced);
+
+  const inserted = applyPatchEdit("- insert:\r\n    - id: auto-open-browser\r\n      name: ./x.mjs\r\n", "auto-open-browser", true);
+  assert.ok(inserted.includes("disabled: true\r\n"), "inserted line uses CRLF");
+  assert.ok(!inserted.includes("disabled: true\n"), "no mixed EOL after insert");
+  parse(inserted);
+
+  const appended = applyPatchEdit("- id: web-app\r\n  disabled: true\r\n", "other", true);
+  assert.ok(appended.includes("- id: other\r\n"), "appended rows use CRLF");
+  parse(appended);
+});
+
+let passed = 0;
+let failed = 0;
+for (const { name, fn } of tests) {
+  try {
+    await fn();
+    passed += 1;
+    console.log(`ok - ${name}`);
+  } catch (error) {
+    failed += 1;
+    console.error(`FAIL - ${name}\n${error instanceof Error ? error.stack : String(error)}`);
+    process.exitCode = 1;
+  }
+}
+console.log(`\n${passed} passed${failed > 0 ? `, ${failed} failed` : ""}`);
+if (failed > 0) {
   console.error("some tests failed");
 }

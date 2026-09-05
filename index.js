@@ -41,6 +41,8 @@ function resolvePatchPath() {
 //   （id-targeted override，用户层最后应用，可覆盖 bundle 层插入的行）。
 export function applyPatchEdit(content, shortId, disabled) {
   const value = disabled ? "true" : "false";
+  // 行尾跟随文件现状：CRLF 文件里插入/替换的行同样带 \r，避免混合行尾。
+  const cr = content.includes("\r\n") ? "\r" : "";
   const lines = content.split("\n");
   const escaped = shortId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const target = new RegExp(`^(\\s*)- id:\\s*${escaped}\\s*$`);
@@ -67,7 +69,7 @@ export function applyPatchEdit(content, shortId, disabled) {
       const dm = disabledLine.exec(lines[j]);
       if (!dm) continue;
       if (/^(true|false)$/.test(dm[1])) {
-        lines[j] = `${child}disabled: ${value}`;
+        lines[j] = `${child}disabled: ${value}${lines[j].endsWith("\r") ? "\r" : ""}`;
         return lines.join("\n");
       }
       throw new Error(
@@ -77,13 +79,16 @@ export function applyPatchEdit(content, shortId, disabled) {
 
     // 无 disabled 行 → 插在条目块末尾（裁掉尾部空行，插在最后一个内容行之后）。
     while (end > i + 1 && lines[end - 1].trim() === "") end -= 1;
-    lines.splice(end, 0, `${child}disabled: ${value}`);
+    lines.splice(end, 0, `${child}disabled: ${value}${cr}`);
     return lines.join("\n");
   }
 
   // 全文件无此 id → 追加顶层补丁条目（主路径：bundle 内置插件都没有行）。
+  // 保持文件原有的行尾约定：原文件以换行结尾 → 追加后仍以换行结尾。
+  const hadTrailingNewline = content === "" || content.endsWith("\n");
   if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-  lines.push(`- id: ${shortId}`, `  disabled: ${value}`);
+  lines.push(`- id: ${shortId}${cr}`, `  disabled: ${value}${cr}`);
+  if (hadTrailingNewline) lines.push("");
   return lines.join("\n");
 }
 
@@ -142,27 +147,46 @@ export async function restoreLatestBackup(patchPath, backupsDir) {
 // ── HTTP 小工具 ───────────────────────────────────────────────────────────
 const MAX_BODY = 64 * 1024;
 
+function isJsonRequest(req) {
+  // 跨站表单只能发简单 content-type（text/plain 等）；强制 application/json 让浏览器
+  // 先发 CORS 预检（本服务无 CORS 头，预检必失败），从而挡住跨站调用。
+  return String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json");
+}
+
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  res.end(body);
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body) });
+  // HEAD 按 HTTP 语义不发 body（content-length 仍如实告知）。
+  res.end(res.req !== undefined && res.req.method === "HEAD" ? undefined : body);
 }
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    // 读体超时：锁在读体期间被持有，不能让挂起的请求无限占锁。
+    const timer = setTimeout(() => {
+      reject(new Error("request body timeout"));
+      req.destroy();
+    }, 5000);
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > MAX_BODY) {
+        clearTimeout(timer);
         reject(new Error("body too large"));
         req.destroy();
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+    req.on("end", () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 }
 
@@ -350,7 +374,8 @@ async function loadYaml() {
       const home = process.env.DSH_HOME ?? join(homedir(), ".dsh");
       yamlModule = await import(pathToFileURL(join(home, "profiles", "node_modules", "js-yaml", "index.js")).href);
     } catch {
-      yamlModule = null;
+      // 失败不缓存：下次调用重试（js-yaml 可能稍后可用）。
+      return null;
     }
   }
   return yamlModule;
@@ -452,15 +477,20 @@ export function apply(ctx) {
     const { patches: _ignored, ...rest } = config;
     const next = [...others, ...structuredClone(rows)];
     const task = entry.update({ config: { ...rest, patches: next } });
+    let timer;
     try {
       await Promise.race([
         task,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("live apply timed out")), 5000)),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("live apply timed out")), 5000);
+        }),
       ]);
       return { ok: true };
     } catch (error) {
       console.error("plugin-switch: recompose failed:", error instanceof Error ? error.message : String(error));
       return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -509,26 +539,31 @@ export function apply(ctx) {
             sendJson(res, 405, { ok: false, error: "method not allowed" });
             return;
           }
+          if (!isJsonRequest(req)) {
+            sendJson(res, 415, { ok: false, error: "content-type must be application/json" });
+            return;
+          }
           if (inFlight) {
             sendJson(res, 409, { ok: false, error: "busy: another operation is in progress" });
             return;
           }
-          const body = await readBody(req);
-          let parsed;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            sendJson(res, 400, { ok: false, error: "invalid JSON body" });
-            return;
-          }
-          const { entries } = parsed ?? {};
-          if (!Array.isArray(entries) || entries.length === 0 || entries.some((item) => typeof item?.id !== "string" || typeof item?.enabled !== "boolean")) {
-            sendJson(res, 400, { ok: false, error: "body must be {entries: [{id: string, enabled: boolean}]}" });
-            return;
-          }
-
+          // 锁必须覆盖读体全程：检查与置位之间不能有 await（否则并发请求都能通过检查）。
           inFlight = true;
           try {
+            const body = await readBody(req);
+            let parsed;
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+              return;
+            }
+            const { entries } = parsed ?? {};
+            if (!Array.isArray(entries) || entries.length === 0 || entries.some((item) => typeof item?.id !== "string" || typeof item?.enabled !== "boolean")) {
+              sendJson(res, 400, { ok: false, error: "body must be {entries: [{id: string, enabled: boolean}]}" });
+              return;
+            }
+
             // 校验：所有 id 唯一命中。
             const changes = [];
             for (const item of entries) {
@@ -550,24 +585,25 @@ export function apply(ctx) {
             let persisted = false;
             let persistError;
             let live = { ok: false };
+            let changed = 0;
             const failures = [];
-            let okChanges = [];
             if (patchPath !== undefined && backupsDir !== undefined) {
               try {
                 const backupName = await writeBackup(patchPath, backupsDir);
-                // 先纯文本预计算每条目标内容，失败的条目剔除（如 !!js 表达式）。
+                // 第一步：纯文本试算每条目标内容，剔除无法安全改写的条目（如 !!js 表达式）。
                 let content = await readFile(patchPath, "utf8");
+                const candidates = [];
                 for (const change of changes) {
                   try {
                     content = applyPatchEdit(content, change.entry.options.id, !change.want);
-                    okChanges.push(change);
+                    candidates.push(change);
                   } catch (error) {
                     failures.push({ id: change.entry.id, error: error instanceof Error ? error.message : String(error) });
                   }
                 }
-                // 再动内存：逐条容错（如服务名冲突的条目，loader 自回滚该条）。
+                // 第二步：再动内存：逐条容错（如服务名冲突的条目，loader 自回滚该条）。
                 const applied = [];
-                for (const change of okChanges) {
+                for (const change of candidates) {
                   try {
                     await change.entry.update({ disabled: !change.want });
                     applied.push(change);
@@ -575,17 +611,20 @@ export function apply(ctx) {
                     failures.push({ id: change.entry.id, error: error instanceof Error ? error.message : String(error) });
                   }
                 }
-                okChanges = applied;
-                // 文件只写入成功生效的条目，一次性落盘。
-                if (okChanges.length > 0) {
-                  content = await readFile(patchPath, "utf8");
-                  for (const change of okChanges) {
-                    content = applyPatchEdit(content, change.entry.options.id, !change.want);
+                changed = applied.length;
+                // 第三步：一次性落盘。试算结果覆盖全部候选条目；有内存失败时
+                // 从盘上重读、只重算成功生效的条目，避免把失败条目写入文件。
+                if (applied.length > 0) {
+                  if (applied.length !== candidates.length) {
+                    content = await readFile(patchPath, "utf8");
+                    for (const change of applied) {
+                      content = applyPatchEdit(content, change.entry.options.id, !change.want);
+                    }
                   }
                   // 直接写原文件（tmp+rename 的原子替换不会触发 DSH 的 patch watcher，已实证）。
                   await writeFile(patchPath, content, "utf8");
-                  scrubIds = new Set([...scrubIds, ...okChanges.map((change) => change.entry.options.id)]);
-                  operationLog.push({ backup: backupName, changes: okChanges.map((change) => ({ id: change.entry.id, prevEnabled: !change.want })) });
+                  scrubIds = new Set([...scrubIds, ...applied.map((change) => change.entry.options.id)]);
+                  operationLog.push({ backup: backupName, changes: applied.map((change) => ({ id: change.entry.id, prevEnabled: !change.want })) });
                   live = await recompose();
                 }
                 persisted = true;
@@ -599,7 +638,7 @@ export function apply(ctx) {
             sendJson(res, 200, {
               ok: true,
               value: {
-                changed: okChanges.length,
+                changed,
                 failed: failures,
                 persisted,
                 live: live.ok,
@@ -615,6 +654,10 @@ export function apply(ctx) {
         if (pathname === "/plugin-switch/undo") {
           if (req.method !== "POST") {
             sendJson(res, 405, { ok: false, error: "method not allowed" });
+            return;
+          }
+          if (!isJsonRequest(req)) {
+            sendJson(res, 415, { ok: false, error: "content-type must be application/json" });
             return;
           }
           if (inFlight) {
@@ -670,26 +713,31 @@ export function apply(ctx) {
             sendJson(res, 405, { ok: false, error: "method not allowed" });
             return;
           }
+          if (!isJsonRequest(req)) {
+            sendJson(res, 415, { ok: false, error: "content-type must be application/json" });
+            return;
+          }
           if (inFlight) {
             sendJson(res, 409, { ok: false, error: "busy: another operation is in progress" });
             return;
           }
-          const body = await readBody(req);
-          let parsed;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            sendJson(res, 400, { ok: false, error: "invalid JSON body" });
-            return;
-          }
-          const { id, enabled } = parsed ?? {};
-          if (typeof id !== "string" || id.trim() === "" || typeof enabled !== "boolean") {
-            sendJson(res, 400, { ok: false, error: "body must be {id: string, enabled: boolean}" });
-            return;
-          }
-
+          // 锁必须覆盖读体全程：检查与置位之间不能有 await（否则并发请求都能通过检查）。
           inFlight = true;
           try {
+            const body = await readBody(req);
+            let parsed;
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+              return;
+            }
+            const { id, enabled } = parsed ?? {};
+            if (typeof id !== "string" || id.trim() === "" || typeof enabled !== "boolean") {
+              sendJson(res, 400, { ok: false, error: "body must be {id: string, enabled: boolean}" });
+              return;
+            }
+
             const matches = findMatches(ctx, id);
             if (matches.length === 0) {
               sendJson(res, 404, { ok: false, error: `plugin entry not found: ${id}` });
@@ -705,9 +753,10 @@ export function apply(ctx) {
             const entry = matches[0];
             const before = !entry.disabled;
             if (before === enabled) {
+              // 幂等早退：本次未写盘，不虚报 persisted（文件是否同步未知）。
               sendJson(res, 200, {
                 ok: true,
-                value: { entryId: entry.id, enabled, before, after: before, persisted: true, changed: false },
+                value: { entryId: entry.id, enabled, before, after: before, changed: false },
               });
               return;
             }

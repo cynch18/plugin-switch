@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.2] - 2026-09-05
+
+- Fixed the in-flight lock race in toggle/bulk: the lock now covers the whole request (including the body read), so concurrent requests can no longer both pass the check and overwrite the same patch file
+- Fixed the test harness to actually run async tests (they previously reported ok immediately while real failures became unhandled rejections); the summary now prints at the end
+- Added an `application/json` content-type check on all POST endpoints: cross-site form POSTs are now blocked at the browser preflight stage (the web client sends the header)
+- `applyPatchEdit` now preserves CRLF line endings and the file's trailing newline (install.ps1 writes CRLF; edits used to create mixed-EOL files and dropped the final newline)
+- bulk no longer reads and recomputes the patch file twice per operation (single probe pass; re-read only when some entries fail in memory)
+- `sendJson` sends no body for HEAD requests; `readBody` has a 5s timeout so a stalled request cannot hold the lock forever; `loadYaml` retries instead of caching failure; the recompose race timer is cleared; the idempotent toggle response no longer claims `persisted: true`
+- installers: anchored the already-installed row checks (the old regex could match unrelated text) and fixed the release installer copying into an existing directory (nested package bug)
+- Tab arbitration now runs continuously instead of a single 300/500ms recheck: if the original read-only inventory registers late (slow load) or is re-enabled mid-session, our tab yields; if it gets disabled mid-session, our tab takes over. Self-registration is now told apart from the original via entry options (reference, label identity, or an owner marker — robust to platform cloning), and all pending timers are cancelled on unload (no zombie re-registration after self-disable)
+
 ## [0.5.1] - 2026-08-15
 
 - Fixed dependents matching for object plugins: merge the resolved `fiber.inject` table (service name → config) so code-level dependencies surface regardless of plugin shape (class/function/{apply}-object)

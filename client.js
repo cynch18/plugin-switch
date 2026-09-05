@@ -279,14 +279,18 @@ window.__ModuleLoader__.load({
       const [bulkRunning, setBulkRunning] = React.useState(false);
       const [notice, setNotice] = React.useState(null);
 
+      const loadSeq = React.useRef(0);
       const load = React.useCallback(async () => {
+        const seq = (loadSeq.current += 1);
         setSnapshot((prev) => ({ ...prev, phase: "loading" }));
         try {
           const res = await fetch("/plugin-switch/list");
           const data = await res.json();
+          if (seq !== loadSeq.current) return; // 过期响应：已有更新的 load，丢弃
           if (!data.ok) throw new Error(data.error || "list failed");
           setSnapshot({ phase: "ready", entries: data.value.entries, hasBackups: data.value.hasBackups === true, error: null });
         } catch (error) {
+          if (seq !== loadSeq.current) return;
           setSnapshot((prev) => ({ ...prev, phase: "error", error: error instanceof Error ? error.message : String(error) }));
         }
       }, []);
@@ -369,7 +373,7 @@ window.__ModuleLoader__.load({
         if (!window.confirm(t("undoConfirm"))) return;
         setNotice(null);
         try {
-          const res = await fetch("/plugin-switch/undo", { method: "POST" });
+          const res = await fetch("/plugin-switch/undo", { method: "POST", headers: { "content-type": "application/json" } });
           const data = await res.json();
           if (!data.ok) {
             setNotice({ kind: "error", text: `${t("undoFailed")}: ${data.error ?? ""}` });
@@ -592,39 +596,82 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), "plugin-switch: dictionaries");
       const t = ctx.locale.bind(NS);
 
+      const SLOT = "settings.plugins.tab";
       let disposer;
+      let pending = null; // 首次注册的延迟句柄
+      let watchdog = null; // 仲裁轮询句柄
+
       const slotOptions = {
-        name: "settings.plugins.tab",
+        name: SLOT,
         id: "all",
         order: 10,
         label: () => t("tab"),
         locale: NS,
+        owner: "plugin-switch", // 自体标记：与原版清单的同 id 条目区分
       };
-      const hasOriginal = () => ctx.slots.entries("settings.plugins.tab").some((entry) => entry.options.id === "all");
+
+      // 是否本插件注册的条目：options 引用比较优先，label 函数引用与 owner 标记
+      // 兜底（兼容平台对 options 的浅/深克隆——函数引用不被克隆，字符串属性随克隆保留）。
+      const isOwnEntry = (entry) =>
+        entry.options === slotOptions || entry.options.label === slotOptions.label || entry.options.owner === slotOptions.owner;
+
+      // 原版只读清单是否在场（排除我们自己注册的同 id 条目，判定无歧义）。
+      const hasOriginal = () => ctx.slots.entries(SLOT).some((entry) => entry.options.id === "all" && !isOwnEntry(entry));
+
       const registerOwn = () => {
-        if (disposer !== undefined) return;
+        if (disposer !== undefined || hasOriginal()) return;
         disposer = ctx.slots.register(slotOptions, PluginSwitchTab);
       };
 
-      ctx.slots.inject("settings.plugins.tab", () => {
+      const unregisterOwn = () => {
+        if (disposer === undefined) return;
+        disposer();
+        disposer = undefined;
+      };
+
+      const stopWatchdog = () => {
+        if (watchdog !== null) {
+          clearInterval(watchdog);
+          watchdog = null;
+        }
+      };
+
+      // 持续仲裁（500ms 轮询，取代旧的单次 300/500ms 复查）：原版晚到（慢加载）或
+      // 中途被启用 → 让位注销；原版消失（运行中被停用）→ 接管注册。
+      // isOwnEntry 排除自身，注册与否不影响 hasOriginal，无自激振荡。
+      const startWatchdog = () => {
+        if (watchdog !== null) return;
+        watchdog = setInterval(() => {
+          try {
+            if (hasOriginal()) unregisterOwn();
+            else registerOwn();
+          } catch {
+            stopWatchdog(); // 环境已不可用（如卸载中）：停止轮询，避免持续报错
+          }
+        }, 500);
+      };
+
+      ctx.slots.inject(SLOT, () => {
         if (hasOriginal()) {
-          // 原只读清单仍在：让位，500ms 复查一次，原版消失则注册。
-          setTimeout(() => {
-            if (disposer !== undefined || hasOriginal()) return;
-            registerOwn();
-          }, 500);
+          // 原版在场：让位，由 watchdog 监视原版消失（运行中被停用）则接管。
+          startWatchdog();
         } else {
-          // 无同 id：延迟 300ms 复查一次（给原版注册留窗口），仍无才注册。
-          setTimeout(() => {
-            if (disposer !== undefined || hasOriginal()) return;
+          // 原版暂不在场：留 300ms 注册窗口（原版可能在慢加载后注册），窗口后接管。
+          pending = setTimeout(() => {
+            pending = null;
             registerOwn();
           }, 300);
+          startWatchdog();
         }
         return () => {
-          if (disposer !== undefined) {
-            disposer();
-            disposer = undefined;
+          // 卸载/插件停用：取消挂起的注册、停止仲裁、注销 tab——防止定时器在
+          // 卸载后再把 tab 注册回来（僵尸注册）。
+          if (pending !== null) {
+            clearTimeout(pending);
+            pending = null;
           }
+          stopWatchdog();
+          unregisterOwn();
         };
       });
     }
