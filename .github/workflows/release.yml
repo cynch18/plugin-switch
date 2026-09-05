@@ -1,0 +1,33 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test
+      # plugin-switch.zip 布局（release-install.ps1 按此约定工作）：
+      #   install.ps1                      ← scripts/release-install.ps1
+      #   dsh-profile-plugin-switch/       ← 运行时三件套（不含 cordis.patch.yml：
+      #   └── package.json index.js client.js   zip 安装把行写进 profile 层，
+      #                                         带 bundle patch 会击穿 -KeepOriginal）
+      - name: Build plugin-switch.zip
+        run: |
+          mkdir -p dist/dsh-profile-plugin-switch
+          cp package.json index.js client.js dist/dsh-profile-plugin-switch/
+          cp scripts/release-install.ps1 dist/install.ps1
+          cd dist && zip -r ../plugin-switch.zip .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: plugin-switch.zip
+          generate_release_notes: true
